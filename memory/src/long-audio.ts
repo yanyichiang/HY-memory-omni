@@ -2,6 +2,7 @@ import { CustomSource, Input, MP3 } from 'mediabunny';
 import { MemoryError, type Timeline, type TimeRange } from './service.js';
 import { acquireAudio } from './audio.js';
 import type { RangeMedia } from './video.js';
+import { audioDecoder, isExtendedAudio } from './native-audio.js';
 
 const fail = (code: string, status = 415): never => { throw new MemoryError(code, status); };
 async function read(source: RangeMedia, offset: number, length: number) {
@@ -71,14 +72,28 @@ async function mp3(source: RangeMedia, selection?: TimeRange) {
   finally { try { input?.dispose(); } finally { release(); } }
 }
 export async function inspectLongAudio(mimeType: string, source: RangeMedia): Promise<Timeline> {
+  if (isExtendedAudio(mimeType)) {
+    const release = await acquireAudio();
+    try {
+      const { inspectExtendedAudio } = await audioDecoder(mimeType);
+      return await inspectExtendedAudio(mimeType, source);
+    } finally { release(); }
+  }
   if (!['audio/wav', 'audio/mpeg'].includes(mimeType)) return fail('audio_type_unsupported');
   const info = mimeType === 'audio/wav' ? await wave(source) : await mp3(source);
   const rate = 'rate' in info ? info.rate : info.sampleRate;
   return { durationMs: Math.ceil(info.samples / rate * 1000), hasAudio: true, hasVideo: false };
 }
-export async function sliceLongAudio(mimeType: string, source: RangeMedia, logical: TimeRange, timeline: Timeline) {
+export async function sliceLongAudio(mimeType: string, source: RangeMedia, logical: TimeRange, timeline: Timeline, options?: { validatedSource?: true }) {
   if (!timeline.hasAudio || timeline.hasVideo || !Number.isSafeInteger(timeline.durationMs) || timeline.durationMs <= 0
     || !Number.isFinite(logical.startMs) || !Number.isFinite(logical.endMs) || logical.startMs < 0 || logical.endMs <= logical.startMs || logical.endMs > timeline.durationMs) return fail('audio_window_invalid', 400);
+  if (isExtendedAudio(mimeType)) {
+    const release = await acquireAudio();
+    try {
+      const { sliceExtendedAudio } = await audioDecoder(mimeType);
+      return await sliceExtendedAudio(mimeType, source, logical, timeline, options);
+    } finally { release(); }
+  }
   let bytes: Uint8Array, rate: number, start: number, end: number;
   if (mimeType === 'audio/wav') {
     const info = await wave(source); rate = info.rate;

@@ -75,6 +75,8 @@ test('standalone audio perception uses parsed WAV windows and the windows respon
   const models = new CloudflareMemoryModels(settings, engine, async (_url, init) => {
     attempts++; sent = JSON.parse(init.body).input;
     assert.ok(sent.generationConfig.responseSchema.properties.windows);
+    assert.equal(sent.generationConfig.maxOutputTokens,4096);
+    assert.deepEqual(sent.generationConfig.thinkingConfig,{thinkingBudget:1024});
     const parts = sent.contents[0].parts;
     const ids = parts.flatMap(part => /^SOURCE WINDOW (w\d+)\./.exec(part.text ?? '')?.slice(1) ?? []);
     for (const part of parts.filter(part => part.inlineData)) {
@@ -212,6 +214,8 @@ test('audio reinspection emits native Gemini systemInstruction and keeps the que
     assert.equal(parts.filter(part=>part.inlineData).length,1);
     assert.equal(parts.filter(part=>part.text).length,2);
     assert.ok(sent.generationConfig.responseSchema.properties.windows);
+    assert.equal(sent.generationConfig.maxOutputTokens,4096);
+    assert.deepEqual(sent.generationConfig.thinkingConfig,{thinkingBudget:1024});
     return temporal(JSON.stringify({windows:[{id:'w0',text:'A steady tone is audible.'}]}));
   });
   const value=await models.perceive('audio/wav',bytes,await inspectMedia('audio/wav',bytes),question);

@@ -51,7 +51,21 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
       }
       return Response.json({ choices: [{ finish_reason: 'stop', message: { content } }] });
     }
-    if (url.pathname.endsWith(':embedContent')) return Response.json({ embedding: { values: [1, ...Array(1535).fill(0)] } });
+    if (url.pathname.endsWith(':embedContent')) {
+      const body = await request.json();
+      for (const part of body.content.parts) {
+        if (part.inline_data?.mime_type.startsWith('audio/')) {
+          assert.ok(['audio/wav', 'audio/mpeg'].includes(part.inline_data.mime_type),
+            'source and query embeddings must receive a supported native representation');
+          if (part.inline_data.mime_type === 'audio/wav') {
+            const wav = Buffer.from(part.inline_data.data, 'base64');
+            assert.equal(wav.toString('ascii', 0, 4), 'RIFF');
+            assert.equal(wav.toString('ascii', 8, 12), 'WAVE');
+          }
+        }
+      }
+      return Response.json({ embedding: { values: [1, ...Array(1535).fill(0)] } });
+    }
     if (url.pathname.endsWith('/ai/run')) {
       const envelope = await request.json();
       assert.equal(envelope.model, 'google/gemini-2.5-flash');
@@ -151,7 +165,9 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
     await api('/delete', { operationId: 'delete-1', ref: next.ref });
     assert.equal((await api('/validate', { refs: [next.ref] })).valid, false);
     assert.deepEqual((await api('/search', { query: 'badge', sessionRef: 'session-d' })).items, []);
-    for (const [file, mimeType] of [['blue-tone.mp4', 'video/mp4'], ['tone.wav', 'audio/wav']]) {
+    for (const [file, mimeType] of [['blue-tone.mp4', 'video/mp4'], ['tone.wav', 'audio/wav'],
+      ['synthetic-extended-48123.opus', 'audio/ogg'], ['synthetic-extended-48123.flac', 'audio/flac'],
+      ['tone-aac.m4a', 'audio/mp4'], ['tone.aac', 'audio/aac']]) {
       const original = (await readFile(new URL(`fixtures/${file}`, import.meta.url))).toString('base64');
       const temporal = await api('/ingest', { operationId: file, sessionRef: 'session-av', messageRef: file, mimeType, dataBase64: original });
       await mf.dispose(); mf = create();
@@ -166,7 +182,21 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
       const read = await api('/read', { ref: temporal.ref, range });
       assert.deepEqual(read.selection, range); assert.equal(read.originalIsFullFile, true);
       assert.equal(read.dataBase64, original); assert.ok(read.timeline.durationMs >= 1000);
-      await api('/delete', { operationId: `delete-${file}`, ref: temporal.ref });
+      let current = temporal.ref;
+      if (['audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac'].includes(mimeType)) {
+        const native = await api('/search', { media: { mimeType, dataBase64: original }, sessionRef: 'native-format-query' });
+        assert.ok(native.items.some(item => item.refs.some(ref => ref.sourceId === temporal.ref.sourceId)),
+          'native compressed audio can query the original source');
+        const rebuilt = await api('/reinspect', { ref: temporal.ref, operationId: `reinspect-${file}`, question: 'Describe the audible tone.' });
+        current = rebuilt.ref;
+        assert.equal(current.revision, temporal.ref.revision + 1);
+        assert.equal((await api('/validate', { refs: [temporal.ref] })).valid, false);
+        const originalRead = await api('/read', { ref: current });
+        assert.equal(originalRead.mimeType, mimeType);
+        assert.equal(originalRead.dataBase64, original, 'reinspection retains compressed original bytes');
+      }
+      await api('/delete', { operationId: `delete-${file}`, ref: current });
+      assert.equal((await api('/validate', { refs: [current] })).valid, false);
       assert.equal((await api('/validate', { refs: [temporal.ref] })).valid, false);
     }
     const publicWorker = await mf.getWorker('memory');

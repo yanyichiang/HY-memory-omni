@@ -1,9 +1,11 @@
 import { BufferSource, EncodedPacketSink, Input, MP3, MP4, QTFF, WAVE } from 'mediabunny';
 import { MemoryError, type Timeline } from './service.js';
+import { inspectInlineAudio, isExtendedAudio } from './native-audio.js';
 
-/** Container/packet inspection only: no decoder, WebCodecs, network source or key lookup. */
+/** Inspect container/packets and, for extended audio, decoded sample clocks. No network or key lookup. */
 export async function inspectMedia(mimeType: string, bytes: Uint8Array): Promise<Timeline | undefined> {
   if (mimeType.startsWith('image/')) return undefined;
+  if (isExtendedAudio(mimeType)) return inspectInlineAudio(mimeType, bytes);
   const format = mimeType === 'video/mp4' ? MP4 : mimeType === 'video/quicktime' ? QTFF
     : mimeType === 'audio/mpeg' ? MP3 : mimeType === 'audio/wav' ? WAVE : undefined;
   if (!format) throw new MemoryError('media_type_unsupported', 415);

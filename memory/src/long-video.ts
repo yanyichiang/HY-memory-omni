@@ -1,6 +1,7 @@
 import { MemoryError, MemoryService, encode, sourceRef, text, timeRange, type Source, type SourceRef, type TimeRange } from './service.js';
 import { inspectLongVideo, nextFixedRange, sliceVideo, type RangeMedia } from './video.js';
 import { inspectLongAudio, sliceLongAudio } from './long-audio.js';
+import { audioDecoderName } from './native-audio.js';
 import type { VideoEvidenceEvent, VideoReasonState } from './video-models.js';
 interface Job {
   kind: 'ingest' | 'reason'; operationId: string; ref: SourceRef; state: 'queued' | 'running' | 'unknown' | 'complete' | 'superseded';
@@ -42,7 +43,9 @@ export class LongVideo {
   }
   private async slice(source: Source, requested: TimeRange, pending = false) {
     const media = await this.media(source, pending);
-    return source.timeline!.hasVideo ? sliceVideo(source.mimeType, media, requested) : sliceLongAudio(source.mimeType, media, requested, source.timeline!);
+    // create() inspected the complete original. media() binds every read to this immutable source revision.
+    return source.timeline!.hasVideo ? sliceVideo(source.mimeType, media, requested)
+      : sliceLongAudio(source.mimeType, media, requested, source.timeline!, { validatedSource: true });
   }
   private async queue(job: Job) {
     await this.service.db.set(`job:${job.operationId}`, job);
@@ -266,7 +269,7 @@ export class LongVideo {
     return { ref: source.ref, mimeType: clip.mimeType, dataBase64: encode(clip.bytes), timeline: source.timeline, outputTimeline: clip.timeline,
       selection, actual: clip.actual, offsetMs: clip.offsetMs, originalIsFullFile: false, perceptionText: '',
       provenance: { roots: [source.ref.sourceId], derivedFrom: [], independence: 'not-established' },
-      parser: { model: source.mimeType === 'audio/mpeg' ? 'mpg123-decoder/1.0.3' : 'container', configKey: source.timeline.hasVideo ? 'native-range-remux-v1' : 'native-audio-sample-range-v1', kind: source.timeline.hasVideo ? 'video' : 'audio' } };
+      parser: { model: audioDecoderName(source.mimeType), configKey: source.timeline.hasVideo ? 'native-range-remux-v1' : 'native-audio-sample-range-v1', kind: source.timeline.hasVideo ? 'video' : 'audio' } };
   }
   async createReason(input: { ref: SourceRef; query: string; operationId: string }) {
     const ref = sourceRef(input.ref), query = text(input.query, 8000), operationId = text(input.operationId, 80);

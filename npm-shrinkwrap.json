@@ -9,10 +9,12 @@
       "version": "0.1.0",
       "license": "Apache-2.0",
       "dependencies": {
+        "@wasm-audio-decoders/flac": "0.2.11",
         "esbuild": "0.28.1",
         "mediabunny": "1.62.1",
         "miniflare": "5.20261012.0-beta",
         "mpg123-decoder": "1.0.3",
+        "opus-decoder": "0.7.12",
         "wrangler": "4.151.0"
       },
       "bin": {
@@ -1175,11 +1177,31 @@
         "simple-yenc": "^1.0.4"
       }
     },
+    "node_modules/@wasm-audio-decoders/flac": {
+      "version": "0.2.11",
+      "resolved": "https://registry.npmjs.org/@wasm-audio-decoders/flac/-/flac-0.2.11.tgz",
+      "integrity": "sha512-bbSGuDDxY89CrS7FYc2cBBfvtgk3EY9As8dVe8PFIgX7ECd/wefdi8UbGlvcdQZczRwE500KBt4cqf/+mMVsfw==",
+      "license": "MIT",
+      "dependencies": {
+        "@wasm-audio-decoders/common": "9.0.7",
+        "codec-parser": "2.5.0"
+      },
+      "funding": {
+        "type": "individual",
+        "url": "https://github.com/sponsors/eshaz"
+      }
+    },
     "node_modules/blake3-wasm": {
       "version": "2.1.5",
       "resolved": "https://registry.npmjs.org/blake3-wasm/-/blake3-wasm-2.1.5.tgz",
       "integrity": "sha512-F1+K8EbfOZE49dtoPtmxUQrpXaBIl3ICvasLh+nJta0xkz+9kF/7uet9fLnwKqhDrmj6g+6K3Tw9yQPUg2ka5g==",
       "license": "MIT"
+    },
+    "node_modules/codec-parser": {
+      "version": "2.5.0",
+      "resolved": "https://registry.npmjs.org/codec-parser/-/codec-parser-2.5.0.tgz",
+      "integrity": "sha512-Ru9t80fV8B0ZiixQl8xhMTLru+dzuis/KQld32/x5T/+3LwZb0/YvQdSKytX9JqCnRdiupvAvyYJINKrXieziQ==",
+      "license": "LGPL-3.0-or-later"
     },
     "node_modules/cookie": {
       "version": "1.1.1",
@@ -1315,6 +1337,19 @@
       "version": "1.0.3",
       "resolved": "https://registry.npmjs.org/mpg123-decoder/-/mpg123-decoder-1.0.3.tgz",
       "integrity": "sha512-+fjxnWigodWJm3+4pndi+KUg9TBojgn31DPk85zEsim7C6s0X5Ztc/hQYdytXkwuGXH+aB0/aEkG40Emukv6oQ==",
+      "license": "MIT",
+      "dependencies": {
+        "@wasm-audio-decoders/common": "9.0.7"
+      },
+      "funding": {
+        "type": "individual",
+        "url": "https://github.com/sponsors/eshaz"
+      }
+    },
+    "node_modules/opus-decoder": {
+      "version": "0.7.12",
+      "resolved": "https://registry.npmjs.org/opus-decoder/-/opus-decoder-0.7.12.tgz",
+      "integrity": "sha512-6zpHFDi/MhYvMwyYiuJPqJ2lcRkfm7wHblSvT3lUtx/kLvHkunoe/rhTn1dLKxqVGLeQj3gQi7CnR0N2p3RuOg==",
       "license": "MIT",
       "dependencies": {
         "@wasm-audio-decoders/common": "9.0.7"

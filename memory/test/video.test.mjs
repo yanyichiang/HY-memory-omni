@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { inspectLongVideo, sliceVideo, nextFixedRange, validateDynamicRanges } from '../dist/video.js';
+import { classifyIsoMedia, inspectLongVideo, sliceVideo, nextFixedRange, validateDynamicRanges } from '../dist/video.js';
 const fixture = name => new Uint8Array(readFileSync(new URL(`fixtures/${name}`, import.meta.url)));
 function source(bytes) {
   const reads = [];
@@ -71,4 +71,20 @@ test('synthetic ten-minute container exceeds the former 120-second limit and rem
   assert.equal(clip.timeline.durationMs,9000);assert.equal(clip.sourceTimeline.durationMs,600000);assert.equal(clip.tracks.length,1);assert.equal(clip.tracks[0].packetCount,9);
   assert.deepEqual(clip.tracks[0].output,{startMs:0,endMs:9000});assert.deepEqual(clip.tracks[0].original,clip.logical);
   assert.ok(clip.bytes.length<bytes.length);assert.ok(media.reads.every(read=>read.length<bytes.length));
+});
+
+
+test('ISO inspection classifies real tracks and rejects huge metadata before demux allocation', async () => {
+  assert.equal(await classifyIsoMedia('video/mp4', source(fixture('tone-aac.m4a'))), 'audio/mp4');
+  assert.equal(await classifyIsoMedia('video/mp4', source(fixture('blue.mp4'))), 'video/mp4');
+  for (const type of ['moov', 'ftyp']) {
+    let bytesRead = 0;
+    const huge = { size: 1024 * 1024 * 1024, async read(offset, length) {
+      assert.equal(offset, 0); assert.ok(length <= 16); bytesRead += length;
+      const bytes = new Uint8Array(length), view = new DataView(bytes.buffer);
+      view.setUint32(0, this.size); bytes.set(new TextEncoder().encode(type), 4); return bytes;
+    } };
+    await assert.rejects(classifyIsoMedia('video/mp4', huge), /media_inspection_metadata_limit/);
+    assert.equal(bytesRead, 16);
+  }
 });

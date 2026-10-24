@@ -16,15 +16,16 @@ const found = await memory('/search', { query: 'Find the blue sign', sessionRef:
 const original = await memory('/read', { ref: saved.ref });
 ```
 
-Use the same path for supported audio/video MIME types. Small-media ingestion accepts at most 8 MiB of **Base64-decoded original file bytes**: this is the uploaded file size before Base64 encoding, not its decoded PCM or video-frame size. Media search queries have a separate 2 MiB original-file limit.
+Use the same path for supported audio/video MIME types. Small-media ingestion accepts at most 8 MiB of **Base64-decoded original file bytes**: this is the uploaded file size before Base64 encoding, not its decoded PCM or video-frame size. Media search queries have a separate 2 MiB original-file limit. M4A/AAC, Ogg Opus and FLAC also require the complete float32 WAV derivative to fit 8 MiB; otherwise use multipart audio ingestion (`media_inline_expansion_exceeded`). Original reads retain the uploaded bytes, while perception, media query and embedding receive the WAV derivative.
 
 | Input | Container / codecs | Duration and track limits |
 | --- | --- | --- |
 | Audio | `audio/wav`: PCM u8, s16, s24, s32 or f32; `audio/mpeg`: MP3 | At most 180 seconds; exactly one audio track |
+| Compressed audio | `audio/mp4`: M4A AAC-LC/HE-AAC/HE-AACv2; `audio/aac`: raw ADTS with those profiles; `audio/ogg`: Ogg Opus; `audio/flac`: native FLAC | At most 180 seconds inline; AAC/Opus mono or stereo; FLAC up to eight channels; derived float32 WAV at most 8 MiB |
 | Short video | `video/mp4` or `video/quicktime`; video AVC, HEVC, AV1 or VP9; optional audio AAC or MP3 | At most 120 seconds; exactly one video track and at most one audio track |
 | Long video | Same supported video containers/codecs, using multipart jobs below | No application-level total duration cap; each processed clip must still fit the media limits |
 
-Encrypted media, extra tracks, live streams and nonzero track origins are rejected. An extension alone does not establish codec support; a container accepted locally must also be supported by the configured models. Typical validation errors are `media_codec_unsupported`, `media_tracks_invalid`, `media_timeline_origin`, `media_duration_exceeded` and `media_too_large`. Long audio uses the matching `/audio/*` multipart API. Run `npm run inspect -- FILE` before uploading an unfamiliar export; see [media compatibility](MEDIA.md).
+Encrypted media, extra tracks, live streams and unsupported nonzero track origins are rejected. M4A supports only the single priming/edit mapping documented in [media compatibility](MEDIA.md); ADTS retains its encoded priming/end-padding samples. An extension alone does not establish codec support; a container accepted locally must also be supported by the configured models. Typical validation errors are `media_codec_unsupported`, `media_tracks_invalid`, `media_timeline_origin`, `media_duration_exceeded` and `media_too_large`. Long audio uses the matching `/audio/*` multipart API. Run `npm run inspect -- FILE` before uploading an unfamiliar export; see [media compatibility](MEDIA.md).
 
 Native media can also be a search cue:
 
@@ -113,8 +114,8 @@ Reasoning event `startMs/endMs` are model estimates, not verified speech boundar
 
 ## Long audio
 
-Use the same upload/part/complete-upload/status/events/step/reason/recover/abort-upload flow with the `/audio` prefix. Upload MIME is `audio/wav` or `audio/mpeg`; an audio upload ID cannot be used through video upload routes. Status/step/reason/recover/events use the same owner-bound recording jobs as video.
+Use the same upload/part/complete-upload/status/events/step/reason/recover/abort-upload flow with the `/audio` prefix. Upload MIME is `audio/wav`, `audio/mpeg`, `audio/mp4`, `audio/aac`, `audio/ogg` or `audio/flac`; an audio upload ID cannot be used through video upload routes. Status/step/reason/recover/events use the same owner-bound recording jobs as video.
 
-`/audio/complete-upload` defaults to `strategy: 'fixed', seconds: 20, minDurationMs: 2000`. Both fixed and dynamic strategies operate on native audio; one window is at most 180 seconds and its WAV excerpt must fit 4 MiB. Total source duration has no application-level cap. MP3 processing re-decodes the preceding audio to preserve frame dependencies; PCM WAV is more efficient for very long recordings. See [input constraints](MEDIA.md).
+`/audio/complete-upload` defaults to `strategy: 'fixed', seconds: 20, minDurationMs: 2000`. Both fixed and dynamic strategies operate on native audio; one window is at most 180 seconds and its WAV excerpt must fit 4 MiB. Total source duration has no application-level cap. New codec excerpts are float32 WAV, so their 4 MiB bound includes four bytes per sample and a 56-byte header. MP3 preserves decoder history by decoding preceding audio; validated Opus/FLAC tasks can stop at the requested end; AAC currently re-decodes the complete source per excerpt. PCM WAV supports direct sample ranges and is more efficient for very long recordings. See [input constraints](MEDIA.md).
 
 `/read` accepts the root ref plus a range and returns native WAV with sample-derived coordinates. `/correct` and `/reinspect` rebuild the entire source and invalidate its older version. Search groups matching clips under `audios`, independently of `videos`. `/audio/reason` takes `{ ref, query, operationId }`; poll `/audio/status` and read its evidence-backed conclusion. Grouping alone does not establish that conclusion.

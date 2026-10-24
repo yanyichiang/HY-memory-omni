@@ -5,7 +5,7 @@ import { readConfig } from '../scripts/config.mjs';
 import { createRuntime } from '../scripts/runtime.mjs';
 
 const profile = process.env.HY_LIVE_PROFILE || 'all';
-if (!['knowledge', 'media', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media or all.');
+if (!['knowledge', 'media', 'formats', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats or all.');
 if (!process.env.HY_LIVE_OUTPUT) throw Error('Set HY_LIVE_OUTPUT to a new private results directory. This command calls your configured live models.');
 const out = resolve(process.env.HY_LIVE_OUTPUT);
 await mkdir(out, { mode: 0o700 }); // Never overwrite a first run or reuse its memory.
@@ -170,12 +170,34 @@ async function mediaCases() {
   check('revoked audio no longer grouped', !after.audios?.some(v => v.ref?.sourceId === refs.audio.sourceId));
   await save();
 }
+async function formatCases() {
+  // Same scripted first utterance in four containers; answers are never supplied to the model.
+  const original = await readFile(new URL('./live-fixtures/proposal.m4a', import.meta.url));
+  await ingest('format-proposal', 'audio/mp4', original);
+  const read = await api('/read', { ref: refs['format-proposal'] });
+  check('M4A original bytes and MIME retained', read.mimeType === 'audio/mp4' && Buffer.from(read.dataBase64, 'base64').equals(original));
+  for (const [file, mimeType] of [['proposal.opus', 'audio/ogg'], ['proposal.flac', 'audio/flac'], ['proposal.aac', 'audio/aac']]) {
+    const bytes = await readFile(new URL('./live-fixtures/' + file, import.meta.url));
+    const found = await api('/search', { query: 'The proposal to hold meeting M42 on Friday', sessionRef: 'format-' + file,
+      media: { mimeType, dataBase64: bytes.toString('base64') } });
+    check(`${mimeType} query grounds the original M4A proposal`, found.items.some(v => v.groundings?.some(g => g.ref.sourceId === source('format-proposal') && g.modalities.includes('audio'))));
+  }
+  const old = refs['format-proposal'];
+  const revised = await api('/reinspect', { ref: old, operationId: 'reinspect-format', question: 'Recheck the audible meeting proposal.' });
+  refs['format-proposal'] = revised.ref;
+  const current = await api('/read', { ref: revised.ref });
+  check('format reinspection preserves original and advances revision', revised.ref.sourceId === old.sourceId && revised.ref.revision === old.revision + 1 && current.mimeType === 'audio/mp4' && Buffer.from(current.dataBase64, 'base64').equals(original) && !(await api('/validate', { refs: [old] })).valid);
+  await api('/revoke', { ref: revised.ref, operationId: 'revoke-format' });
+  check('format revocation invalidates current reference', !(await api('/validate', { refs: [revised.ref] })).valid);
+  await save();
+}
 try {
   runtime = await start();
   check('unauthenticated API rejected', (await runtime.dispatchFetch('https://acceptance.test/revision', { method: 'POST', headers: { 'Content-Type':'application/json' }, body:'{}' })).status === 401);
   check('private read callback hidden', (await runtime.dispatchFetch('https://acceptance.test/read-store', { method: 'POST' })).status === 404);
-  if (profile !== 'media') await knowledgeCases();
-  if (profile !== 'knowledge') await mediaCases();
+  if (profile === 'all' || profile === 'knowledge') await knowledgeCases();
+  if (profile === 'all' || profile === 'media') await mediaCases();
+  if (profile === 'formats') await formatCases();
   report.finished = true;
 } catch (error) {
   report.failures.push(error.message); report.error = error.message;
