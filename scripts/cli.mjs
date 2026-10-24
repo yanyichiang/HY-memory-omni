@@ -15,7 +15,22 @@ async function main() {
     console.log(`Created ${resolve(stateDir(), 'config.json')}. Set the three REPLACE_ values, then run npm start. Your API token is in that file.`);
     return;
   }
-  if (command === 'setup') { await setup({ force: true }); console.log('Runtime dependencies and Worker bundle ready.'); return; }
+  if (command === 'setup') {
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+    try {
+      await setup({ force: true, signal: controller.signal });
+      console.log('Runtime dependencies and Worker bundle ready.');
+    } catch (error) {
+      if (error.retainLock || !controller.signal.aborted) throw error;
+    } finally {
+      process.removeListener('SIGINT', stop);
+      process.removeListener('SIGTERM', stop);
+    }
+    return;
+  }
   if (command !== 'start') throw new Error('Usage: hy-memory-omni [init|setup|start]');
   const config = await readConfig();
   const port = Number(process.env.PORT || 8787);
@@ -26,12 +41,15 @@ async function main() {
   let lock;
   try { lock = await open(lockPath, 'wx', 0o600); }
   catch (error) { if (error.code === 'EEXIST') throw new Error('This state directory is locked. Stop its running instance. After an unclean exit, verify it is stopped before removing runtime.lock.'); throw error; }
+  const setupController = new AbortController();
   let child;
   let stopping = false;
+  let retainLock = false;
   let stopTimer;
   const stop = () => {
     if (stopping) return;
     stopping = true;
+    setupController.abort();
     if (child && child.exitCode === null && child.signalCode === null) {
       if (child.connected) child.send({ type: 'stop' }, () => {});
       // Request termination if initialization is stuck. Wait for
@@ -45,7 +63,7 @@ async function main() {
   process.on('SIGTERM', stop);
   try {
     await lock.writeFile(`${process.pid}\n`);
-    await setup();
+    await setup({ signal: setupController.signal });
     if (stopping) return;
     // The supervisor must never load Miniflare: its process exit hook can exit
     // synchronously on a signal before async lock cleanup finishes.
@@ -71,12 +89,13 @@ async function main() {
     });
     await completion;
   } catch (error) {
-    if (!stopping) throw error;
+    retainLock = error.retainLock === true;
+    if (retainLock || !stopping) throw error;
   } finally {
     clearTimeout(stopTimer);
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
-    try { await lock.close(); } finally { await unlink(lockPath); }
+    try { await lock.close(); } finally { if (!retainLock) await unlink(lockPath); }
   }
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

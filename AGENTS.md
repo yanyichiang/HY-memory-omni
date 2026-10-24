@@ -2,6 +2,8 @@
 
 Standalone text/image/audio/video memory. Owner/release author: YY. Keep the repository private until the Owner explicitly changes visibility. Do not publish an npm package, deploy resources, or migrate existing memory as part of ordinary source work.
 
+The intended deliverable is a reusable, self-hosted open-source memory service for other users. The current private repository and npm publication restrictions are release authorization boundaries pending Owner review, not a permanent self-use-only product restriction. Each installation supplies its own model credentials, storage and trusted owner; the project does not provide a shared hosted service.
+
 - Preserve original media, source revisions, independent evidence and linked claims. Conflict is not an automatic revision; revisions require evidence/authority. Whole-source rebuild is the current editing strategy.
 - `memory/` is the TS authority and Workers storage, `engine/` is the stateless Python Hy Writer/Reader. `gateway/` authenticates a fixed owner. Do not accept caller-selected principals or expose the internal read callback.
 - `npm start` is the unified local entry. Configuration and state are under `.hy-memory-omni/` (or HY_HOME); never commit them. Tests may replace model HTTP explicitly; production startup must load engine/src/main.py.

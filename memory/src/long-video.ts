@@ -5,6 +5,7 @@ interface Job {
   kind: 'ingest' | 'reason'; operationId: string; ref: SourceRef; state: 'queued' | 'running' | 'unknown' | 'complete' | 'superseded';
   cursorMs: number; memoryRevision?: number; ranges?: TimeRange[]; analysisWindow?: TimeRange; query?: string; after?: string; reasoning?: VideoReasonState; historyCounts?: { events: number; summaries: number }; reasonedClips?: number; error?: string;
 }
+interface RecoveryBinding { previousOperationId: string; acceptUnknown: true; kind: Job['kind']; ref: SourceRef; query?: string }
 interface CreateInput { operationId: string; messageRef: string; sessionRef: string; mimeType: string; key: string; strategy: 'fixed' | 'dynamic'; seconds: number; minDurationMs: number }
 const prefix = (ref: SourceRef) => `clip:${ref.sourceId}@${ref.revision}:`;
 const identity = (a: SourceRef, b: SourceRef) => a.sourceId === b.sourceId && a.revision === b.revision && a.mediaRef === b.mediaRef;
@@ -184,9 +185,9 @@ export class LongVideo {
       await this.service.db.delete(`work:${job.operationId}`);
     });
   }
-  async rebuild(ref: SourceRef, operationId: string, question?: string, correction?: string) {
+  async rebuild(ref: SourceRef, operationId: string, question?: string, correction?: string, recovery?: RecoveryBinding) {
     ref = sourceRef(ref); operationId = text(operationId, 80);
-    const binding = { ref, question, correction };
+    const binding = recovery ?? { ref, question, correction };
     await this.service.revision();
     const operation = await this.service.db.get<{ input: string; state: string; ref?: SourceRef }>(`operation:${operationId}`);
     if (operation) {
@@ -213,14 +214,24 @@ export class LongVideo {
     return { ref: source.ref, operationId, state: 'queued' };
   }
   async recover(input: { previousOperationId: string; operationId: string; acceptUnknown: boolean }) {
-    if (input.acceptUnknown !== true || input.operationId === input.previousOperationId) throw new MemoryError('unknown_effect_requires_explicit_recovery', 400);
-    const previous = await this.job(input.previousOperationId);
+    const previousOperationId = text(input.previousOperationId, 80), operationId = text(input.operationId, 80);
+    if (input.acceptUnknown !== true || operationId === previousOperationId) throw new MemoryError('unknown_effect_requires_explicit_recovery', 400);
+    const previous = await this.job(previousOperationId);
+    const binding: RecoveryBinding = { previousOperationId, acceptUnknown: true, kind: previous.kind, ref: previous.ref, ...(previous.query === undefined ? {} : { query: previous.query }) };
+    const operation = await this.service.db.get<{ input: string; state: string; ref?: SourceRef }>(`operation:${operationId}`);
+    if (operation) {
+      if (operation.input !== JSON.stringify(binding)) throw new MemoryError('operation_conflict');
+      const job = await this.service.db.get<Job>(`job:${operationId}`);
+      // An interrupted admission is observable but never permission to repeat work.
+      if (!job) return { operationId, state: 'unknown', error: 'video_recovery_receipt_unknown' };
+      if (job.operationId !== operationId || job.kind !== previous.kind || !operation.ref || !identity(operation.ref, job.ref)) throw new MemoryError('operation_conflict');
+      return this.status(operationId);
+    }
     if (previous.state === 'complete' || previous.state === 'superseded') throw new MemoryError('video_job_not_recoverable');
     if (previous.kind === 'reason') {
-      const operationId = text(input.operationId, 80);
       const source = await this.service.source(previous.ref);
       if (!source.video?.complete) throw new MemoryError('source_not_complete_video', 400);
-      await this.service.begin(operationId, { previousOperationId: previous.operationId, acceptUnknown: true, ref: previous.ref, query: previous.query });
+      await this.service.begin(operationId, binding);
       const reasoning: VideoReasonState = { events: [], conclusion: { text: 'Explicit recovery: not yet examined', status: 'unknown', support: [], opposition: [] }, incomplete: false, requireMore: false, model: 'pending', configKey: 'native-video-reason-v1' };
       await this.service.db.transaction(async () => {
         await this.service.source(previous.ref);
@@ -234,7 +245,7 @@ export class LongVideo {
       });
       return { ref: previous.ref, operationId, state: 'queued' };
     }
-    const result = await this.rebuild(previous.ref, input.operationId);
+    const result = await this.rebuild(previous.ref, operationId, undefined, undefined, binding);
     await this.service.finish(previous.operationId, 'superseded');
     await this.service.db.set(`job:${previous.operationId}`, { ...previous, state: 'superseded' });
     await this.service.db.delete(`work:${previous.operationId}`);

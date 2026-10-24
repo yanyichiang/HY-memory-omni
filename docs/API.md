@@ -16,7 +16,15 @@ const found = await memory('/search', { query: 'Find the blue sign', sessionRef:
 const original = await memory('/read', { ref: saved.ref });
 ```
 
-Use the same path for supported audio/video MIME types. Small-media ingestion accepts at most 8 MiB decoded bytes; audio currently supports PCM WAV and MP3. Video supports the implemented MP4/QuickTime demux and copy paths; encrypted/multiple-audio/nonzero-origin examples are explicitly rejected. An extension alone does not establish codec support. Long videos use the multipart job interface below. All-model media support depends on the configured provider models.
+Use the same path for supported audio/video MIME types. Small-media ingestion accepts at most 8 MiB of **Base64-decoded original file bytes**: this is the uploaded file size before Base64 encoding, not its decoded PCM or video-frame size. Media search queries have a separate 2 MiB original-file limit.
+
+| Input | Container / codecs | Duration and track limits |
+| --- | --- | --- |
+| Audio | `audio/wav`: PCM u8, s16, s24, s32 or f32; `audio/mpeg`: MP3 | At most 180 seconds; exactly one audio track |
+| Short video | `video/mp4` or `video/quicktime`; video AVC, HEVC, AV1 or VP9; optional audio AAC or MP3 | At most 120 seconds; exactly one video track and at most one audio track |
+| Long video | Same supported video containers/codecs, using multipart jobs below | No application-level total duration cap; each processed clip must still fit the media limits |
+
+Encrypted media, extra tracks, live streams and nonzero track origins are rejected. An extension alone does not establish codec support; a container accepted locally must also be supported by the configured models. Typical validation errors are `media_codec_unsupported`, `media_tracks_invalid`, `media_timeline_origin`, `media_duration_exceeded` and `media_too_large`. Long audio does **not** have a multipart/segmentation API yet; `/video/*` requires a video track and cannot be used as a large-audio upload workaround.
 
 Native media can also be a search cue:
 
@@ -71,7 +79,20 @@ const job = await memory('/video/complete-upload', {
 // For fixed windows instead: strategy: 'fixed', seconds: 10.
 ```
 
-The job proceeds through Workers alarms while the service runs. Read `/video/status` with `{operationId:'video-001'}`; `/video/step` can explicitly advance a queued job. Paused or unknown work requires inspection and `/video/recover`, not blind polling/retry. `/video/events` pages job evidence using `operationId`, optional `cursor` and `limit`. `/video/abort-upload` accepts `{uploadId}` before completion.
+The job proceeds through Workers alarms while the service runs. Read `/video/status` with `{operationId:'video-001'}`; `/video/step` can explicitly advance a queued job. A queued job normally progresses automatically. A running job may still be waiting for a provider; polling status does not repeat its work. Do not call `/video/step` as a progress query: observing a running job there marks its outcome unknown to fence late results.
+
+For an unknown outcome, inspect the error and `/operation` before explicitly accepting recovery:
+
+```js
+const recovery = { previousOperationId: 'video-001', operationId: 'video-recovery-001', acceptUnknown: true };
+const recovered = await memory('/video/recover', recovery);
+// If this response is lost, query this new ID, or resend the exact same recovery request.
+const current = await memory('/video/status', { operationId: recovery.operationId });
+```
+
+Recovery may repeat work whose external outcome was unknown. A new recovery ID represents a new explicit decision, not an automatic network retry. Replaying the same bound recovery returns its recorded status without creating another revision or model call; a receipt with no established job remains unknown. Actual job states are `queued`, `running`, `unknown`, `complete` and `superseded`. `/video/events` pages job evidence using `operationId`, optional `cursor` and `limit`. `/video/abort-upload` accepts `{uploadId}` before completion.
+
+Recovery receipts created before the request-binding fix may reject replay with `operation_conflict`; query `/video/status` using their existing recovery operation ID instead. Do not create a new recovery merely to bypass that conflict.
 
 Dynamic segmentation reads scene content to choose boundaries; fixed segmentation uses time intervals. Search returns multiple matched clips grouped under their original video's revision. To integrate evidence across time, create a separate reasoning job:
 

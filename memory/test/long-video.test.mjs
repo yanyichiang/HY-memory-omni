@@ -107,8 +107,52 @@ test('explicit reason recovery restarts same root and supersedes an old in-fligh
   await assert.rejects(h.manager.recover({previousOperationId:'reason',operationId:'redo',acceptUnknown:false}),/unknown_effect_requires_explicit_recovery/);
   const recovered=await h.manager.recover({previousOperationId:'reason',operationId:'redo',acceptUnknown:true});
   assert.deepEqual(recovered.ref,ref);assert.equal((await h.service.source(ref)).state,'active');assert.equal((await h.manager.status('reason')).state,'superseded');
+  assert.deepEqual((await h.manager.recover({previousOperationId:'reason',operationId:'redo',acceptUnknown:true})).ref,recovered.ref);
   release();await assert.rejects(first,/video_job_no_longer_running/);
   assert.equal((await h.manager.status('reason')).state,'superseded');assert.equal((await h.manager.status('redo')).cursorMs,0);
+});
+test('ingest and reason recovery replay lost receipts without new work or revisions',async()=>{
+  for(const kind of ['ingest','reason']){
+    const h=harness(),{ref}=await h.manager.create(create);
+    let previousOperationId='upload';
+    if(kind==='reason'){
+      for(let n=0;n<3;n++)await h.manager.step('upload');
+      await h.manager.createReason({ref,query:'Decision?',operationId:'reason'});
+      previousOperationId='reason';
+    }
+    const request={previousOperationId,operationId:'repair',acceptUnknown:true};
+    const admitted=await h.manager.recover(request),revision=await h.service.revision();
+    const calls=h.calls.length,source=await h.db.get(`source:${ref.sourceId}`);
+    h.manager.range=async()=>{throw Error('must_not_read_media_on_replay')};
+    h.service.models.reasonVideoClip=async()=>{throw Error('must_not_call_model_on_replay')};
+    assert.deepEqual((await h.manager.recover(request)).ref,admitted.ref);
+    assert.equal((await h.manager.recover(request)).state,'queued');
+    assert.equal(await h.service.revision(),revision);assert.equal(h.calls.length,calls);
+    assert.deepEqual(await h.db.get(`source:${ref.sourceId}`),source);
+    await assert.rejects(h.manager.recover({...request,acceptUnknown:false}),/unknown_effect_requires_explicit_recovery/);
+    await assert.rejects(h.manager.rebuild(ref,'repair'),/operation_conflict/);
+    // A distinct old job must never reuse this recovery's operation ID.
+    const previous=await h.db.get(`job:${previousOperationId}`);
+    await h.db.set('job:other',{...previous,operationId:'other',state:'unknown'});
+    await assert.rejects(h.manager.recover({...request,previousOperationId:'other'}),/operation_conflict/);
+    // An admission receipt with no job is unknown, not a fresh recovery attempt.
+    await h.db.delete('job:repair');
+    assert.equal((await h.manager.recover(request)).state,'unknown');
+    assert.equal(await h.service.revision(),revision);
+    assert.deepEqual(await h.db.get(`source:${ref.sourceId}`),source);
+  }
+});
+test('ingest recovery replay does not revive a superseded in-flight formation',async()=>{
+  const h=harness();await h.manager.create(create);
+  let enter,release;const entered=new Promise(r=>{enter=r}),blocked=new Promise(r=>{release=r});
+  h.service.form=async()=>{enter();await blocked};
+  const first=h.manager.step('upload');await entered;
+  const request={previousOperationId:'upload',operationId:'repair',acceptUnknown:true};
+  const recovered=await h.manager.recover(request);
+  assert.deepEqual((await h.manager.recover(request)).ref,recovered.ref);
+  release();await assert.rejects(first,/source_changed|video_job_no_longer_running/);
+  assert.equal((await h.manager.status('upload')).state,'superseded');
+  assert.equal((await h.manager.status('repair')).cursorMs,0);
 });
 test('native history grows beyond 32 while rolling context compacts and every original event remains pageable',async()=>{
   const h=harness(),{ref}=await h.manager.create(create);

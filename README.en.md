@@ -209,6 +209,17 @@ Keep configuration and credentials private and out of version control.
 
 </details>
 
+<details>
+<summary><strong>First-install download failures and abnormal exits</strong></summary>
+
+Run `npm run setup` separately and use uv's output to distinguish Pyodide downloads, Python package installation and build failures. Pyodide mirrors are already supported: `HY_PYODIDE_MIRROR` takes a **base URL** replacing the official releases/download prefix, not the full URL of an archive. Preserve the official version directories and asset names; a local `file:///absolute/path/to/mirror` is also supported. See the [official uv reference](https://docs.astral.sh/uv/reference/cli/#uv-python-install--pyodide-mirror). This project does not automatically switch to a third-party mirror.
+
+When `npm start` receives a normal stop signal, it cancels active dependency preparation and waits for its child process to exit. Killing the supervisor forcibly or losing power can still leave `runtime.lock`. Do not remove it merely because its parent PID is gone: first verify that this instance's runtime/workerd children have also stopped. Stop normally with `Ctrl+C` in its terminal; this project has no separate `npm stop` command.
+
+`/health` only reports that the HTTP entrypoint responds; the startup probe only checks Python loading. Neither establishes live CFUT, BYOK or Unified Billing authorization, or semantic retrieval quality.
+
+</details>
+
 ## Verification and Status
 
 | Verification target | Evidence for this version |
@@ -244,6 +255,7 @@ npm pack
 - There is no application-level fixed **2,000-memory total limit**. Request pagination, media size, context windows, and underlying platform capacity retain their respective constraints.
 - Retrieval returns a bounded candidate set. No hit does not prove that relevant evidence is absent; grouping segments by video also does not mean cross-segment reasoning has reached a conclusion.
 - The current editing unit is a **whole-source rebuild**. Individual fact editing is not yet available.
+- Ordinary media ingestion accepts original files up to 8 MiB; audio lasts at most 180 seconds and short video at most 120 seconds. Media queries accept original files up to 2 MiB. Long videos use the job API; long-audio segmentation is not implemented. See [API documentation](docs/API.md) for formats and errors.
 
 ## Documentation and Contributions
 

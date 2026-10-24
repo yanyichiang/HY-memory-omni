@@ -209,6 +209,17 @@ const original = await memory('/read', { ref: saved.ref });
 
 </details>
 
+<details>
+<summary><strong>首次安装下载失败或异常退出</strong></summary>
+
+先单独运行 `npm run setup`，根据 uv 输出区分 Pyodide 下载、Python 包安装和构建失败。Pyodide 镜像入口已支持；`HY_PYODIDE_MIRROR` 填写替代官方 releases/download 的**基础 URL**，不是某个压缩包的完整 URL。镜像需保留官方资产的版本目录与文件名，也可以使用本地 `file:///绝对路径/镜像目录`。具体规则见 [uv 官方说明](https://docs.astral.sh/uv/reference/cli/#uv-python-install--pyodide-mirror)。本项目不自动切换到第三方镜像。
+
+`npm start` 收到正常停止信号时，会取消正在进行的依赖准备并等待子进程退出。强制杀死启动器或断电仍可能留下 `runtime.lock`；不要仅凭文件中父 PID 不存在就删锁，先确认该实例的 runtime/workerd 子进程也已停止。正常停止使用运行终端的 `Ctrl+C`，本项目没有独立的 `npm stop` 命令。
+
+`/health` 只表示 HTTP 入口可响应；启动探针只核验 Python 加载。它们都不证明 CFUT、BYOK 或 Unified Billing 的真实模型调用已获授权，也不证明检索语义质量。
+
+</details>
+
 ## 验证与状态
 
 | 验证对象 | 本版证据 |
@@ -244,6 +255,7 @@ npm pack
 - 没有应用级固定的 **2,000 条记忆总量上限**；请求分页、媒体大小、上下文窗口及底层平台容量仍有各自约束。
 - 检索返回有界候选集合。没有命中不能证明相关证据不存在；按视频归组也不等于跨片段推理已经得出结论。
 - 当前修改粒度是**整个来源重建**，尚未提供单条事实编辑。
+- 普通媒体写入上限为原文件 8 MiB；音频最长 180 秒、短视频最长 120 秒；媒体查询上限为原文件 2 MiB。长视频使用任务接口，长音频切分尚未实现。支持格式及错误说明见 [API 文档](docs/API.md)。
 
 ## 文档与贡献
 

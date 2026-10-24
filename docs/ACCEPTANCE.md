@@ -46,3 +46,16 @@ npm pack
 ```
 
 `npm run test:install` creates isolated temporary state and synthetic credentials. `HY_PACKAGE_ROOT` can point it at an installed package; `HY_STARTUP_ONLY=1` exercises startup/shutdown without repeating the lifecycle suite. Existing memory regression tests remain available through `npm run test:memory`; the unchanged core's full semantic benchmark was not rerun as a substitute for standalone installation acceptance.
+
+## Review follow-up — 2026-10-24
+
+Two concrete recovery defects were addressed after reviewing installation and API constraints:
+
+1. A stop signal delivered only to the launcher while setup was running did not cancel its preparation subprocess. Both `start` and standalone `setup` now propagate cancellation to their own preparation process group, wait for it to disappear and stop subsequent stages. A direct child's exit does not count as the whole group's exit. After a bounded TERM/KILL sequence, an unconfirmed group produces an explicit error and keeps the runtime lock. A forced kill of the supervisor itself still requires manual inspection; stale locks are not automatically removed.
+2. A successful `/video/recover` marked the old job superseded before a caller could safely replay a lost HTTP response. Recovery now binds the new operation to the previous operation, task kind, original reference and query. Identical replays return the established status without another revision or model call; mismatched requests are rejected and a receipt without a job remains unknown. Late results from superseded work remain fenced.
+
+Verification used Linux x64 and Node 22.23.4 in an isolated source checkout with existing locked npm dependencies. Build and typecheck passed. The video manager, real workerd multipart test and gateway suites passed 21 tests. The final setup suite passed seven tests on Linux and macOS, including parent-only SIGTERM for the actual CLI, standalone setup cancellation, and a process-group leader exiting before a TERM-resistant descendant. Independent static review identified two intermediate cancellation regressions; both were fixed and the final increment had no remaining reported blocker.
+
+No default-network cold download or new live-model semantic evaluation was performed in this follow-up. Local documentation links and `git diff --check` passed. Documentation now specifies Base64-decoded original file sizes, audio/video duration and codec limits, actual job states, the distinction between status polling and stepping, and the lack of a long-audio ingestion path.
+
+Remaining usability work includes a release-specific live-provider/semantic acceptance workflow, long-audio ingestion, clearer input compatibility diagnostics, and a complete authenticated cloud deployment path if cloud installation is offered. Semantic search remains bounded; `/sources` and `/knowledge` provide their own pagination. Owner identity limits, stale-ref rejection, explicit unknown recovery, loopback and internal-entrypoint isolation are intentional protections, not defects to remove. Current private/npm publication restrictions govern this project's release authorization, not whether other users may eventually self-host it.
