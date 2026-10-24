@@ -1,3 +1,4 @@
+import { isDocument, documentQueryParts } from './document-media.js';
 import { BufferSource, EncodedPacketSink, Input, MP3, MP4, QTFF, WAVE } from 'mediabunny';
 import { MemoryError, type Timeline } from './service.js';
 import { inspectInlineAudio, isExtendedAudio } from './native-audio.js';
@@ -7,6 +8,7 @@ import { isExtendedImage, nativeImage } from './native-image.js';
 
 /** Inspect container/packets and, for extended audio, decoded sample clocks. No network or key lookup. */
 export async function inspectMedia(mimeType: string, bytes: Uint8Array): Promise<Timeline | undefined> {
+  if(isDocument(mimeType)){await documentQueryParts(mimeType,bytes);return undefined;}
   if (isExtendedImage(mimeType)) return (await nativeImage(mimeType,bytes)).timeline;
   if (mimeType.startsWith('image/')) return undefined;
   if (isExtendedAudio(mimeType)) return inspectInlineAudio(mimeType, bytes);

@@ -3,11 +3,13 @@ import { MemoryError, MemoryService, principal, record, sourceRef, text, type Pr
 import { CloudflareMemoryModels } from './models.js';
 import { ObjectStore } from './storage.js';
 import { LongVideo } from './long-video.js';
+import { Documents } from './document-jobs.js';
+import { isDocument } from './document-media.js';
 import { VideoUploads } from './uploads.js';
 
 function errorResponse(error: unknown) {
   const known = error instanceof MemoryError;
-  const internal = error instanceof Error && /^(memory_|video_|audio_|knowledge_|NODE_|REMOTE_)/.test(error.message) ? error.message : 'memory_operation_unknown';
+  const internal = error instanceof Error && /^(memory_|video_|audio_|document_|knowledge_|NODE_|REMOTE_)/.test(error.message) ? error.message : 'memory_operation_unknown';
   return Response.json({ error: known ? error.code : internal }, { status: known ? error.status : 502, headers: { 'Cache-Control': 'no-store' } });
 }
 /** Only trusted service bindings reach these named entrypoints. No public route. */
@@ -68,7 +70,7 @@ export class MemoryObject extends DurableObject<Cloudflare.Env> {
         return new Uint8Array(await part.arrayBuffer());
       } };
     });
-    return { service, video, db, uploads: new VideoUploads(db, this.env.ORIGINALS, owner), audioUploads: new VideoUploads(db, this.env.ORIGINALS, owner, 'audio') };
+    return { service, video, documents: new Documents(service), db, uploads: new VideoUploads(db, this.env.ORIGINALS, owner), audioUploads: new VideoUploads(db, this.env.ORIGINALS, owner, 'audio') };
   }
   async fetch(request: Request): Promise<Response> {
     try { await this.maintenance; } catch (error) { return errorResponse(error); }
@@ -76,12 +78,12 @@ export class MemoryObject extends DurableObject<Cloudflare.Env> {
     try {
       const path = new URL(request.url).pathname;
       const body: Record<string, unknown> = ['/video/part', '/audio/part'].includes(path) ? { principal: JSON.parse(text(request.headers.get('memory-principal'), 1000)) } : await boundedBody(request);
-      const { service, video, db, uploads: videoUploads, audioUploads } = this.components(principal(body.principal));
+      const { service, video, documents, db, uploads: videoUploads, audioUploads } = this.components(principal(body.principal));
       await service.revision();
       const uploads = path.startsWith('/audio/') ? audioUploads : videoUploads;
       let result: unknown;
       switch (path) {
-        case '/ingest': result = await service.ingest(body); break;
+        case '/ingest': result = typeof body.mimeType === 'string' && isDocument(body.mimeType) ? await documents.create(body) : await service.ingest(body); break;
         case '/ingest-text': result = await service.ingest(body, true); break;
         case '/search': result = await service.search(body); break;
         case '/read-store': result = await service.readStore(body); break;
@@ -96,8 +98,14 @@ export class MemoryObject extends DurableObject<Cloudflare.Env> {
         }
         case '/correct': case '/reinspect': {
           const ref = sourceRef(body.ref), source = await db.get<import('./service.js').Source>(`source:${ref.sourceId}`);
-          result = source?.video ? await video.rebuild(ref, text(body.operationId, 80), path === '/reinspect' ? text(body.question, 4096) : undefined,
-            path === '/correct' ? text(body.text) : undefined) : path === '/correct' ? await service.correct(body) : await service.reinspect(body); break;
+          if (source?.document) {
+            result = await documents.rebuild(ref, text(body.operationId, 80), path === '/reinspect' ? text(body.question, 4096) : undefined,
+              path === '/correct' ? text(body.text) : undefined);
+          } else if (source?.video) {
+            result = await video.rebuild(ref, text(body.operationId, 80), path === '/reinspect' ? text(body.question, 4096) : undefined,
+              path === '/correct' ? text(body.text) : undefined);
+          } else result = path === '/correct' ? await service.correct(body) : await service.reinspect(body);
+          break;
         }
         case '/knowledge': {
           if (body.sourceIds !== undefined && (!Array.isArray(body.sourceIds) || body.sourceIds.length > 64)) throw new MemoryError('knowledge_source_ids_invalid', 400);
@@ -121,6 +129,10 @@ export class MemoryObject extends DurableObject<Cloudflare.Env> {
             key: uploaded.key, mimeType: uploaded.mimeType, strategy: body.strategy === undefined ? (path.startsWith('/audio/') ? 'fixed' : 'dynamic') : body.strategy as 'fixed' | 'dynamic',
             seconds: Number(body.seconds ?? (path.startsWith('/audio/') ? 20 : 10)), minDurationMs: Number(body.minDurationMs ?? 2000) }); break;
         }
+        case '/document/status': result = await documents.status(text(body.operationId, 80)); break;
+        case '/document/step': result = await documents.step(text(body.operationId, 80)); break;
+        case '/document/recover': result = await documents.recover({ previousOperationId: text(body.previousOperationId, 80), operationId: text(body.operationId, 80), acceptUnknown: body.acceptUnknown === true }); break;
+        case '/document/units': result = await documents.units(sourceRef(body.ref), body.cursor === undefined ? undefined : text(body.cursor, 1024), Number(body.limit ?? 32)); break;
         case '/audio/status': case '/video/status': result = await video.status(text(body.operationId, 80)); break;
         case '/audio/events': case '/video/events': result = await video.events(text(body.operationId, 80), body.cursor === undefined ? undefined : text(body.cursor, 1024), Number(body.limit ?? 32)); break;
         case '/audio/step': case '/video/step': result = await video.step(text(body.operationId, 80)); break;
@@ -128,7 +140,7 @@ export class MemoryObject extends DurableObject<Cloudflare.Env> {
         case '/audio/recover': case '/video/recover': result = await video.recover({ previousOperationId: text(body.previousOperationId, 80), operationId: text(body.operationId, 80), acceptUnknown: body.acceptUnknown === true }); break;
         default: throw new MemoryError('route_not_found', 404);
       }
-      // R2 page cleanup is resumable and continues even when no video jobs remain.
+      // R2 page cleanup is resumable and continues even when no media jobs remain.
       if (path !== '/read-store') {
         db.check();
         const alarm = await this.ctx.storage.getAlarm();
@@ -144,16 +156,28 @@ export class MemoryObject extends DurableObject<Cloudflare.Env> {
     if (!owner) return;
     this.working = true;
     try {
-      const { service, video, db } = this.components(owner);
+      const { service, video, documents, db } = this.components(owner);
       await service.revision();
-      const work = await db.page<string>('work:', undefined, 1);
-      if (work.entries[0]) await video.step(work.entries[0].value);
+      const [work, documentWork] = await Promise.all([
+        db.page<string>('work:', undefined, 1), db.page<string>('doc-work:', undefined, 1),
+      ]);
+      const next = this.ctx.storage.kv.get<string>('media-work-next') ?? 'document';
+      const document = documentWork.entries[0], temporal = work.entries[0];
+      // Persist the next modality before provider IO. A failed or interrupted job
+      // cannot starve the other queue; each alarm still executes only one item.
+      if (document && (next === 'document' || !temporal)) {
+        this.ctx.storage.kv.put('media-work-next', 'video');
+        await documents.step(document.value);
+      } else if (temporal) {
+        this.ctx.storage.kv.put('media-work-next', 'document');
+        await video.step(temporal.value);
+      }
     } finally {
       this.working = false;
       if (this.activeRequests) await this.ctx.storage.setAlarm(Date.now() + 30_000);
       else {
         // Maintenance never changes the root beneath a foreground request.
-        // Python callbacks remain free during video/model work; only bounded GC
+        // Python callbacks remain free during media/model work; only bounded GC
         // takes this local maintenance slot, with no provider call inside it.
         this.maintenance = this.maintain(owner);
         try { await this.maintenance; } finally { this.maintenance = undefined; }
@@ -191,14 +215,15 @@ export class MemoryObject extends DurableObject<Cloudflare.Env> {
         db.check();
         this.ctx.storage.kv.put('media-gc-cursor', sweep.key);
       } else this.ctx.storage.kv.delete('media-gc-cursor');
-      const work = await db.page('work:', undefined, 1);
+      const [work, documentWork] = await Promise.all([db.page('work:', undefined, 1), db.page('doc-work:', undefined, 1)]);
+      const hasWork = work.entries.length > 0 || documentWork.entries.length > 0;
       const garbage = await this.env.ORIGINALS.list({ prefix: `memory-pages/${encodeURIComponent(owner.ownerRef)}/${owner.scopeRef}/journals/`, limit: 1 });
       const mediaGC = await db.page('media-gc:', undefined, 1);
       const remainingProjections = await db.page('projection-index:', undefined, 1);
       const currentRevision = await db.get<number>('revision') ?? 1;
       const checked = this.ctx.storage.kv.get<number>('projection-gc-checked-revision');
-      if (work.entries.length || garbage.objects.length || mediaGC.entries.length || remainingProjections.entries.length && checked !== currentRevision) {
-        await this.ctx.storage.setAlarm(Date.now() + (work.entries.length ? 1000 : 30_000));
+      if (hasWork || garbage.objects.length || mediaGC.entries.length || remainingProjections.entries.length && checked !== currentRevision) {
+        await this.ctx.storage.setAlarm(Date.now() + (hasWork ? 1000 : 30_000));
       }
   }
 

@@ -1,3 +1,4 @@
+import {preparePdf} from './scripts/prepare-pdf.mjs';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { basename } from 'node:path';
@@ -9,9 +10,10 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 await prepareMp3();
 await prepareAudioCodecs();
 const matroskaEntry = await prepareMatroska();
-await build({ absWorkingDir: root, entryPoints: ['src/worker.ts', 'src/service.ts', 'src/models.ts', 'src/media.ts', 'src/audio.ts', 'src/extended-audio.ts', 'src/aac-audio.ts', 'src/native-audio.ts', 'src/native-image.ts', 'src/audio-models.ts', 'src/knowledge.ts', 'src/knowledge-models.ts', 'src/storage.ts', 'src/staged-store.ts', 'src/paged-store.ts', 'src/vector-index.ts', 'src/node-store.ts', 'src/knowledge-store.ts', 'src/video.ts', 'src/video-models.ts', 'src/long-video.ts', 'src/long-audio.ts', 'src/uploads.ts'],
+const pdfEntry=await preparePdf();
+await build({ absWorkingDir: root, entryPoints: ['src/worker.ts', 'src/document-jobs.ts', 'src/document-media.ts', 'src/service.ts', 'src/models.ts', 'src/media.ts', 'src/audio.ts', 'src/extended-audio.ts', 'src/aac-audio.ts', 'src/native-audio.ts', 'src/native-image.ts', 'src/audio-models.ts', 'src/knowledge.ts', 'src/knowledge-models.ts', 'src/storage.ts', 'src/staged-store.ts', 'src/paged-store.ts', 'src/vector-index.ts', 'src/node-store.ts', 'src/knowledge-store.ts', 'src/video.ts', 'src/video-models.ts', 'src/long-video.ts', 'src/long-audio.ts', 'src/uploads.ts'],
   outdir: 'dist', bundle: true, splitting: true, format: 'esm', platform: 'browser', target: 'es2022',
-  external: ['cloudflare:workers'], sourcemap: true, alias: { mediabunny: matroskaEntry },
+  external: ['cloudflare:workers'], sourcemap: true, alias: { mediabunny: matroskaEntry, 'pdf-lib':pdfEntry },
   plugins: [{ name: 'static-audio-wasm', setup(build) {
     build.onResolve({ filter: /\.wasm$/ }, args => ({ path: `./${basename(args.path)}`, external: true }));
   } }] });
@@ -31,3 +33,5 @@ for (const [codec, wasm] of [['heif','image-decoder'],['animation','animation']]
   await copyFile(new URL(`codecs/${codec}/${wasm}.wasm`, import.meta.url), new URL(`dist/${wasm}.wasm`, import.meta.url));
 }
 for (const codec of ['heif','gif','animation']) await cp(new URL(`codecs/${codec}/`, import.meta.url), new URL(`dist/licenses/${codec}/`, import.meta.url), { recursive: true });
+
+await cp(new URL('.generated/pdf-lib/', import.meta.url), new URL('dist/licenses/pdf-lib/', import.meta.url), {recursive:true});

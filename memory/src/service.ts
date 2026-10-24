@@ -1,3 +1,5 @@
+import { isDocument } from './document-media.js';
+import type { DocumentRoot, DocumentPart } from './document-types.js';
 import { inspectMedia } from './media.js';
 import { KnowledgeStore } from './knowledge-store.js';
 import type { ProjectionOptions } from './knowledge-projection.js';
@@ -17,7 +19,7 @@ export interface ImageRepresentation {
   itemIds?:number[];loopCount?:number;repetitions?:number;loopMeaning?:string;timescale?:number;background?:unknown;pixelAspectRatioRaw?:number;
   sourceDepth?:number|null;sourceIccBytes?:number|null;matte?:'white';colorLimitation:string;mapping?:unknown;downsample?:unknown;
 }
-export interface Perception { model: string; configKey: string; kind: 'text' | 'image' | 'audio' | 'video'; text: string; representation?:ImageRepresentation }
+export interface Perception { model: string; configKey: string; kind: 'text' | 'image' | 'audio' | 'video' | 'document'; text: string; representation?:ImageRepresentation }
 export interface Timeline { durationMs: number; hasAudio: boolean; hasVideo: boolean; animation?:ImageRepresentation }
 export interface TimeRange { startMs: number; endMs: number }
 export interface Grounding extends TimeRange {
@@ -27,10 +29,11 @@ export interface Grounding extends TimeRange {
 export interface TemporalMatch { intervals: Grounding[]; correctionRelevant: boolean }
 export interface ImageMatch { matches: boolean; text: string; correctionRelevant: boolean; model: string; configKey: string }
 export interface NodeRow { payload: Record<string, unknown>; embedding: number[]; lexicalTokens?: string[] }
-export interface Vector { model: string; values: number[]; modalities?: ('text' | 'image' | 'audio' | 'video')[] }
+export interface Vector { model: string; values: number[]; modalities?: ('text' | 'image' | 'audio' | 'video' | 'document')[] }
 export interface Source {
   ref: SourceRef; messageRef: string; sessionRef: string; mimeType: string; key: string;
   state: 'pending' | 'active' | 'deleted' | 'revoked'; perception?: Perception; representation?:ImageRepresentation;
+  document?:DocumentRoot; documentUnit?:DocumentPart;
   vector?: Vector; correction?: string; cleanupPending?: boolean; timeline?: Timeline;
   clip?: { original: SourceRef; logical: TimeRange; actual: TimeRange; offsetMs: number };
   // Historical serialized plan key shared by long audio/video roots; MIME and timeline identify modality.
@@ -51,6 +54,7 @@ export interface Models {
   embed(input: { text: string } | { mimeType: string; bytes: Uint8Array }): Promise<Vector>;
   locate(input: { query?: string; media?: { mimeType: string; bytes: Uint8Array }; mimeType: string; bytes: Uint8Array; timeline: Timeline; correction?: string }): Promise<TemporalMatch>;
   matchImage(input: { query?: string; media?: { mimeType: string; bytes: Uint8Array }; mimeType: string; bytes: Uint8Array; correction?: string }): Promise<ImageMatch>;
+  matchDocument?(input: { query?:string;media?:{mimeType:string;bytes:Uint8Array};bytes:Uint8Array;correction?:string }):Promise<ImageMatch>;
   compute(body: Record<string, unknown>): Promise<unknown>;
 }
 interface Operation {
@@ -80,7 +84,7 @@ export function sourceRef(value: unknown): SourceRef {
 }
 function mediaType(value: unknown): string {
   const type = text(value, 80);
-  if (!['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif', 'image/avif', 'image/gif', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac', 'video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'].includes(type)) throw new MemoryError('unsupported_media', 415);
+  if (!isDocument(type) && !['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif', 'image/avif', 'image/gif', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac', 'video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'].includes(type)) throw new MemoryError('unsupported_media', 415);
   return type;
 }
 export function timeRange(value: unknown, timeline: Timeline): TimeRange {
@@ -233,7 +237,7 @@ export class MemoryService {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) throw new MemoryError('invalid_limit', 400);
     const page = await this.db.page<Source>('source:', after, limit), items: Source[] = [];
     for (const { value } of page.entries) if (await this.available(value.ref)) items.push(value);
-    return { items: items.map(({ ref, mimeType, timeline, clip, video }) => ({ ref, mimeType, timeline, clip, video })), nextCursor: page.nextCursor };
+    return { items: items.map(({ ref, mimeType, timeline, clip, video, document, documentUnit }) => ({ ref, mimeType, timeline, clip, video, document, documentUnit })), nextCursor: page.nextCursor };
   }
   async readStore(input: Record<string, unknown>) {
     if (input.revision !== await this.revision()) throw new MemoryError('memory_view_changed');
@@ -247,6 +251,7 @@ export class MemoryService {
   async ingest(input: Record<string, unknown>, ownerText = false): Promise<unknown> {
     const operationId = text(input.operationId, 160), messageRef = text(input.messageRef, 160), sessionRef = text(input.sessionRef, 160);
     const mimeType = ownerText ? 'text/plain' : mediaType(input.mimeType);
+    if (isDocument(mimeType)) throw new MemoryError('document_job_required',400);
     const bytes = ownerText ? new TextEncoder().encode(text(input.text, 65536)) : decode(input.dataBase64);
     if (input.derivedFrom !== undefined && (!Array.isArray(input.derivedFrom) || input.derivedFrom.length > 20)) throw new MemoryError('source_dependencies_invalid', 400);
     const derivedFrom = ((input.derivedFrom ?? []) as unknown[]).map(sourceRef);
@@ -296,10 +301,10 @@ export class MemoryService {
     const perception = source.perception ?? (source.correction === undefined ? source.mimeType === 'text/plain'
       ? { model: source.derivedFrom?.length ? 'derived-text' : 'owner-statement', configKey: 'owner-text-v1', kind: 'text' as const, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) }
       : await this.models.perceive(source.mimeType, bytes, source.timeline) : {
-      model: 'owner-correction', configKey: 'owner-revision', kind: source.mimeType.split('/')[0] as Perception['kind'], text: source.correction,
+      model: 'owner-correction', configKey: 'owner-revision', kind: (source.documentUnit ? 'document' : source.mimeType.split('/')[0]) as Perception['kind'], text: source.correction,
     });
     text(perception.text, 65536); text(perception.model, 200); text(perception.configKey, 200);
-    if (perception.kind !== source.mimeType.split('/')[0]) throw new MemoryError('perception_kind_invalid', 502);
+    if (perception.kind !== (source.documentUnit ? 'document' : source.mimeType.split('/')[0])) throw new MemoryError('perception_kind_invalid', 502);
     if (source.correction === undefined && perception.model === 'owner-correction') throw new MemoryError('invalid_perception_authority', 502);
     await this.source(source.ref, true, new Set(), stagingRoot);
     source = { ...source, perception, ...(perception.representation ? {representation:perception.representation} : {}) };
@@ -358,7 +363,7 @@ export class MemoryService {
     await this.source(ref); // Revocation can run while R2 is awaited.
     if (!bytes) throw new MemoryError('original_missing', 502);
     return { ref, mimeType: source.mimeType, dataBase64: encode(bytes), perceptionText: source.perception?.text ?? '', ...(source.representation ? {representation:source.representation} : {}),
-      knowledge: await this.knowledge([ref.sourceId]), ...(source.clip ? { clip: source.clip } : {}), ...(source.verification ? { verification: source.verification } : {}),
+      knowledge: await this.knowledge([ref.sourceId]), ...(source.document ? {document:source.document} : {}), ...(source.documentUnit ? {documentUnit:source.documentUnit,originalIsFullFile:false} : {}), ...(source.clip ? { clip: source.clip } : {}), ...(source.verification ? { verification: source.verification } : {}),
       provenance: { roots: await this.roots(source), derivedFrom: source.derivedFrom ?? [], independence: 'not-established' as const },
       parser: source.perception && { model: source.perception.model, configKey: source.perception.configKey, kind: source.perception.kind, ...(source.perception.representation ? {representation:source.perception.representation} : {}) },
       ...(source.timeline ? { timeline: source.timeline, originalIsFullFile: true, ...(selection ? { selection } : {}) } : {}) };
@@ -402,7 +407,7 @@ export class MemoryService {
     }
     // Candidate and presentation limits are distinct. Rejected originals free a result slot.
     const ranked = [...items.values()].sort((a, b) => b.score - a.score);
-    const grounded = new Map<string, TemporalMatch>(), images = new Map<string, ImageMatch>();
+    const grounded = new Map<string, TemporalMatch>(), images = new Map<string, ImageMatch>(), documents = new Map<string, ImageMatch>();
     const results = [];
     let examinedCandidates = 0;
     const limitations = ['Semantic candidate retrieval is not exhaustive; no returned match does not prove absence.', 'Text keyword scores use a bounded posting candidate corpus; persisted vector search uses a bounded tree traversal.'];
@@ -413,26 +418,34 @@ export class MemoryService {
       const unseenOriginals: SourceRef[] = [];
       for (const ref of item.refs) {
         const source = await this.source(ref), key = JSON.stringify(ref);
-        if ((source.timeline || source.mimeType.startsWith('image/')) && !grounded.has(key) && !images.has(key)) unseenOriginals.push(ref);
+        if ((source.timeline || source.mimeType.startsWith('image/') || source.documentUnit) && !grounded.has(key) && !images.has(key) && !documents.has(key)) unseenOriginals.push(ref);
       }
-      if (grounded.size + images.size + unseenOriginals.length > 20) break;
+      if (grounded.size + images.size + documents.size + unseenOriginals.length > 20) break;
       examinedCandidates++;
       const matches: (Grounding & { ref: SourceRef })[] = [];
       const imageEvidence: { ref: SourceRef; text: string; model: string; configKey: string; basis: 'original-image' }[] = [];
+      const documentEvidence: {ref:SourceRef;original:SourceRef;locator:Record<string,unknown>;text:string;model:string;configKey:string;basis:'native-document-unit'}[] = [];
       let temporal = false, unmatched = false, corrected = false;
       for (const ref of item.refs) {
         const source = await this.source(ref), key = JSON.stringify(ref);
         const isImage = source.mimeType.startsWith('image/') && !source.timeline;
-        if (!source.timeline && !isImage) continue;
+        const isDoc = !!source.documentUnit;
+        if (!source.timeline && !isImage && !isDoc) continue;
         temporal ||= !!source.timeline;
-        if (!grounded.has(key) && !images.has(key)) {
+        if (!grounded.has(key) && !images.has(key) && !documents.has(key)) {
           const bytes = await this.blobs.get(source.key);
           await this.source(ref);
           if (revision !== await this.revision()) throw new MemoryError('memory_changed_during_search');
           if (!bytes) throw new MemoryError('original_missing', 502);
           const input = { ...(query === undefined ? {} : { query }), ...(queryMedia ? { media: queryMedia } : {}),
             mimeType: source.mimeType, bytes, ...(source.correction === undefined ? {} : { correction: source.correction }) };
-          if (isImage) {
+          if (isDoc) {
+            if(!this.models.matchDocument) throw new MemoryError('document_grounding_unavailable',502);
+            const match=await this.models.matchDocument(input);
+            if(typeof match.matches!=='boolean'||typeof match.correctionRelevant!=='boolean'||match.correctionRelevant && source.correction===undefined)throw new MemoryError('document_match_invalid',502);
+            text(match.text);text(match.model,200);text(match.configKey,200);documents.set(key,match);
+            limitations.push('Document results use native source coordinates and disclosed parser coverage. Grouping units does not establish a cross-unit conclusion.');
+          } else if (isImage) {
             const match = await this.models.matchImage(input);
             if (typeof match.matches !== 'boolean' || typeof match.correctionRelevant !== 'boolean' || match.correctionRelevant && source.correction === undefined) throw new MemoryError('image_match_invalid', 502);
             text(match.text); text(match.model, 200); text(match.configKey, 200);
@@ -450,7 +463,11 @@ export class MemoryService {
           await this.source(ref);
           if (revision !== await this.revision()) throw new MemoryError('memory_changed_during_search');
         }
-        if (isImage) {
+        if(isDoc){
+          const match=documents.get(key)!;
+          if(match.matches)documentEvidence.push({ref,original:source.documentUnit!.original,locator:source.documentUnit!.locator,text:match.text,model:match.model,configKey:match.configKey,basis:'native-document-unit'});
+          else if(match.correctionRelevant)corrected=true;else unmatched=true;
+        } else if (isImage) {
           const match = images.get(key)!;
           if (match.matches) imageEvidence.push({ ref, text: match.text, model: match.model, configKey: match.configKey, basis: 'original-image' });
           else if (match.correctionRelevant) corrected = true;
@@ -462,13 +479,19 @@ export class MemoryService {
         }
       }
       if (!unmatched) results.push({ ...item,
-        ...(temporal ? { groundings: matches } : {}), ...(imageEvidence.length ? { imageEvidence } : {}),
-        retrieval: corrected ? 'owner-correction' as const : temporal ? 'grounded' as const : imageEvidence.length ? 'verified-image' as const : 'native-candidate' as const });
+        ...(temporal ? { groundings: matches } : {}), ...(documentEvidence.length?{documentEvidence}:{}), ...(imageEvidence.length ? { imageEvidence } : {}),
+        retrieval: corrected ? 'owner-correction' as const : temporal ? 'grounded' as const : documentEvidence.length ? 'verified-document' as const : imageEvidence.length ? 'verified-image' as const : 'native-candidate' as const });
     }
     if (revision !== await this.revision()) throw new MemoryError('memory_changed_during_search');
     const knowledge = await this.knowledge(results.flatMap(item => item.refs.map(ref => ref.sourceId)));
     const videos = new Map<string, { ref: SourceRef; clips: { ref: SourceRef; startMs: number; endMs: number; rank: number; text: string }[] }>();
     const audios = new Map<string, { ref: SourceRef; clips: { ref: SourceRef; startMs: number; endMs: number; rank: number; text: string }[] }>();
+    const documentGroups = new Map<string,{ref:SourceRef;units:{ref:SourceRef;locator:Record<string,unknown>;rank:number;text:string}[]}>();
+    for(const [rank,item] of results.entries())for(const evidence of item.documentEvidence??[]){
+      const key=sourceKey(evidence.original),group=documentGroups.get(key)??{ref:evidence.original,units:[]};
+      if(!group.units.some(unit=>sourceKey(unit.ref)===sourceKey(evidence.ref)))group.units.push({ref:evidence.ref,locator:evidence.locator,rank:rank+1,text:evidence.text});
+      documentGroups.set(key,group);
+    }
     for (const [rank, item] of results.entries()) for (const ref of item.refs) {
       const source = await this.source(ref);
       if (!source.clip) continue;
@@ -483,23 +506,27 @@ export class MemoryService {
       }
       if (group.clips.length) groups.set(key, group);
     }
-    return { revision, items: results, knowledge, videos: [...videos.values()], audios: [...audios.values()], coverage: { scope: 'retrieved-candidates' as const, exhaustive: false as const,
-      candidateLimit: 20 as const, candidates: ranked.length, examinedSources: grounded.size + images.size, returned: results.length,
+    return { revision, items: results, knowledge, videos: [...videos.values()], audios: [...audios.values()], documents:[...documentGroups.values()], coverage: { scope: 'retrieved-candidates' as const, exhaustive: false as const,
+      candidateLimit: 20 as const, candidates: ranked.length, examinedSources: grounded.size + images.size + documents.size, returned: results.length,
       remainingCandidates: ranked.length - examinedCandidates, absence: 'not-established' as const, limitations: [...new Set(limitations)] } };
   }
 
-  async invalidate(ref: SourceRef, state: Source['state'], correction?: string): Promise<Source> {
+  async invalidate(ref: SourceRef, state: Source['state'], correction?: string, admit?:(next:Source)=>Promise<void>): Promise<Source> {
     return this.db.transaction(async () => {
       const source = await this.source(ref, true);
+      if(source.documentUnit) throw new MemoryError('document_root_required',400);
       const { perception: _perception, vector: _vector, ...retained } = source;
       const next: Source = { ...retained, ref: { ...ref, revision: ref.revision + 1 }, state,
         ...(source.video ? { video: { ...source.video, cursorMs: 0, complete: false } } : {}),
+        ...(source.document?{document:{...source.document,cursor:0,complete:false}}:{}),
         ...(correction === undefined ? {} : { correction }), ...(state === 'deleted' ? { cleanupPending: true } : {}) };
       // Dependency resolution invalidates every descendant without enumerating the corpus.
       await this.db.set(`source-invalidated:${ref.sourceId}:${ref.revision}`, new Date().toISOString());
       if (source.video) await this.db.set(`media-gc:${crypto.randomUUID()}`, { prefix: `${source.key}.clips/${state === 'deleted' ? '' : ref.revision + '/'}` });
+      if(source.document) await this.db.set(`media-gc:${crypto.randomUUID()}`,{prefix:`${source.key}.units/${state==='deleted'?'':ref.revision+'/'}`});
       await this.saveSource(next);
       await this.db.set('revision', await this.revision() + 1);
+      if(admit)await admit(next);
       return next;
     });
   }
@@ -508,6 +535,7 @@ export class MemoryService {
     const old = await this.begin(operationId, { ref, correction });
     if (old.old !== undefined) return old.old;
     try {
+      const original=await this.source(ref,true);if(original.document)throw new MemoryError('document_job_required',400);
       const source = await this.invalidate(ref, 'pending', correction);
       await this.stage(operationId, source.ref, 'perception');
       const bytes = await this.blobs.get(source.key);
@@ -521,6 +549,7 @@ export class MemoryService {
     const old = await this.begin(operationId, { ref, question });
     if (old.old !== undefined) return old.old;
     try {
+      const original=await this.source(ref,true);if(original.document)throw new MemoryError('document_job_required',400);
       const source = { ...(await this.invalidate(ref, 'pending')), reinspectionQuestion: question };
       await this.saveSource(source);
       await this.stage(operationId, source.ref, 'perception');
@@ -552,6 +581,8 @@ export class MemoryService {
     if (previousId === operationId) throw new MemoryError('recovery_requires_new_operation', 400);
     const previous = await this.db.get<Operation>(`operation:${previousId}`);
     if (!previous?.ref) throw new MemoryError('operation_not_recoverable');
+    const previousSource=await this.db.get<Source>(`source:${previous.ref.sourceId}`);
+    if(previousSource?.documentUnit)throw new MemoryError('document_root_required',400);
     const own = await this.db.get<Operation>(`operation:${operationId}`);
     if (own?.state === 'committed') {
       const expected = JSON.stringify({ previousId, acceptUnknown: input.acceptUnknown === true });
@@ -574,6 +605,8 @@ export class MemoryService {
         await this.finish(previousId, 'superseded'); await this.finish(operationId, 'committed', result);
         return result;
       }
+      if(source.documentUnit)throw new MemoryError('document_root_required',400);
+      if(source.document)throw new MemoryError('document_recovery_required',400);
       if (source.state !== 'pending') throw new MemoryError('source_not_pending');
       source = await this.db.transaction(async () => {
         const next: Source = { ...source!, ref: { ...source!.ref, revision: source!.ref.revision + 1 } };

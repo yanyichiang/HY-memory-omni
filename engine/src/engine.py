@@ -102,7 +102,7 @@ def _validate(body):
         _text(source['sourceId'],'SOURCE_INVALID',256); _text(source['mediaRef'],'SOURCE_INVALID',1024)
         if type(source['revision']) is not int or source['revision']<1: raise ValueError('SOURCE_REVISION_INVALID')
         if not isinstance(perception,dict) or set(perception)!={'model','configKey','kind','text'}: raise ValueError('PERCEPTION_REQUIRED')
-        if perception['kind'] not in ('text','image','audio','video'): raise ValueError('PERCEPTION_KIND_INVALID')
+        if perception['kind'] not in ('text','image','audio','video','document'): raise ValueError('PERCEPTION_KIND_INVALID')
         for key in ['model','configKey','text']: _text(perception[key],'PERCEPTION_INVALID')
         if body['content'] != perception['text']: raise ValueError('PERCEPTION_CONTENT_MISMATCH')
 
