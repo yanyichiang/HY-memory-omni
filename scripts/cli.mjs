@@ -7,6 +7,16 @@ import { root, stateDir, readConfig } from './config.mjs';
 import { setup } from './setup.mjs';
 const command = process.argv[2] || 'start';
 async function main() {
+  if (command === 'cloud') {
+    const { cloudMain } = await import('./cloud.mjs');
+    console.log(JSON.stringify(await cloudMain(process.argv.slice(3)), null, 2));
+    return;
+  }
+  if (command === 'inspect') {
+    const { inspectFile } = await import('./inspect.mjs');
+    console.log(JSON.stringify(await inspectFile(process.argv[3]), null, 2));
+    return;
+  }
   if (command === 'init') {
     await mkdir(stateDir(), { recursive: true, mode: 0o700 });
     const config = JSON.parse(await readFile(new URL('config.example.json', root), 'utf8'));
@@ -31,7 +41,7 @@ async function main() {
     }
     return;
   }
-  if (command !== 'start') throw new Error('Usage: hy-memory-omni [init|setup|start]');
+  if (command !== 'start') throw new Error('Usage: hy-memory-omni [init|setup|start|inspect FILE|cloud COMMAND]');
   const config = await readConfig();
   const port = Number(process.env.PORT || 8787);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be between 1 and 65535.');

@@ -7,3 +7,7 @@ dependencies = ["pydantic==2.14.1", "numpy==2.4.6", "openai==2.54.0", "httpx==0.
 
 [dependency-groups]
 dev = ["workers-py==1.17.9", "workers-runtime-sdk==1.9.5"]
+
+# Deploy/dev implicitly sync too; the pinned pure-Python dependencies include sdists.
+[tool.pywrangler]
+allow-build = true

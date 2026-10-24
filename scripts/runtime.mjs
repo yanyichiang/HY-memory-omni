@@ -2,10 +2,20 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { readFile, readdir, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { root } from './config.mjs';
 
 // Fixture model interception is supplied only by tests; the CLI always uses main.py.
 export async function createRuntime({ config, persistence, port = 8787, fixture = false, outboundService }) {
+  const require = createRequire(import.meta.url);
+  const miniflareRequire = createRequire(require.resolve('miniflare'));
+  const { version } = JSON.parse(await readFile(miniflareRequire.resolve('undici/package.json'), 'utf8'));
+  const parsed = /^(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.*)?$/.exec(version);
+  if (!parsed) throw new Error('Cannot verify the Undici version used by Miniflare.');
+  const [, major, minor, patch, prerelease] = parsed;
+  if (+major === 7 && (+minor < 30 || (+minor === 30 && (+patch < 1 || (+patch === 1 && prerelease))))) {
+    throw new Error(`Miniflare resolves unsupported Undici ${version}. In the consumer project root run npm pkg set overrides.undici=7.30.1, then npm install. For a source checkout run npm ci in the source root.`);
+  }
   await mkdir(persistence, { recursive: true, mode: 0o700 });
   const dist = fileURLToPath(new URL('memory/dist/', root)), engine = fileURLToPath(new URL('engine/', root));
   const modules = {}, pythonModules = {};
@@ -33,8 +43,11 @@ export async function createRuntime({ config, persistence, port = 8787, fixture 
       ...(outboundService ? { outboundService } : {}) },
     { name: 'python-engine', modules: true, compatibilityDate: '2026-10-19', compatibilityFlags: ['python_workers'], script: 'export default {}',
       serviceBindings: { MEMORY_READ: { name: 'memory', entrypoint: 'MemoryReadAPI' } },
+      ...(outboundService ? { outboundService } : {}),
       bindings: Object.fromEntries(Object.entries(config).filter(([key]) => /^HY_(LLM|EMBED)_/.test(key))) }
   ] });
+  options.workers[0].config.manifest = { mainModule: 'worker.mjs', modulesRoot: fileURLToPath(new URL('gateway/', root)),
+    modules: { 'worker.mjs': { type: 'esm', contents: await readFile(new URL('gateway/worker.mjs', root), 'utf8') } } };
   options.workers[1].config.manifest = { mainModule: 'worker.js', modulesRoot: dist, modules };
   options.workers[2].config.manifest = { mainModule: fixture ? 'fixture_worker.py' : 'main.py', modulesRoot: join(engine, 'src'), modules: pythonModules };
   const runtime = new Miniflare(options);

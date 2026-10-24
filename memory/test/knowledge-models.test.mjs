@@ -160,3 +160,37 @@ test('model-supplied replacement quotes are rejected rather than overriding serv
     assert.equal(calls, 1);
   }
 });
+
+
+test('L2 paraphrases support node binding but cannot replace the independent original-observation quote',async()=>{
+  const observation='A brass key lies on the desk.';
+  const paraphrase='A metallic access key is resting on a desk in the office.';
+  const supplied={...input,perception:{...input.perception,text:observation},nodes:[{
+    payload:{node_id:'l2-key',layer:'l2_fact',status:'active',is_latest:true,content:paraphrase},embedding:[0.1,0.2]
+  }]};
+  const proposed={...draft,nodeId:'l2-key',text:'A key lies on a desk.',subject:'key observed in this source',event:'non-event: placement of this source-local key',predicate:'location',value:'desk',conditions:'',quote:'resting on a desk'};
+  for(const valid of [false,true]){
+    let calls=0;
+    const answer={...proposed,quote:valid?'key lies on the desk':proposed.quote};
+    const models=new CloudflareKnowledgeModels('fixed',async(system,body)=>{
+      calls++;
+      assert.equal(Object.keys(body).at(-1),'perception');
+      assert.ok(Object.keys(body).indexOf('nodes')<Object.keys(body).indexOf('perception'));
+      assert.deepEqual(body.perception,supplied.perception);
+      assert.deepEqual(body.nodes,[{nodeId:'l2-key',content:paraphrase}]);
+      assert.match(system,/only permitted source of quote is input\.perception\.text/);
+      assert.match(system,/input\.nodes\[\]\.content.*NEVER a quote source/);
+      assert.match(system,/nodeId binds the supporting L2 node; quote independently binds the original observation/);
+      assert.match(system,/Do not project details introduced only by L2 wording/);
+      assert.match(system,/quote="rests beside the entryway" is invalid/);
+      assert.ok(system.endsWith('do not substitute L2 wording or fill quote with unrelated observation text.'));
+      return JSON.stringify({claims:[answer]});
+    });
+    if(valid)assert.deepEqual(await models.extract(supplied),[answer]);
+    else {
+      assert.ok(paraphrase.includes(answer.quote));assert.equal(observation.includes(answer.quote),false);
+      await assert.rejects(models.extract(supplied),/knowledge_claim_binding_invalid/);
+    }
+    assert.equal(calls,1,'invalid quotes never trigger retry, repair, claim deletion or quote replacement');
+  }
+});

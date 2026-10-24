@@ -59,8 +59,11 @@ test('actual PCM excerpts retain leading silence and refine complete audible eve
   const result = await locateAudio(input(), model, async (parts, schema) => {
     const clips = sources(parts); calls.push(clips);
     assert.ok(schema.properties.matches);
+    assert.equal(schema.properties.correctionRelevant,undefined);
+    assert.deepEqual(schema.required,['matches']);
+    assert.doesNotMatch(parts.at(-1).text,/correctionRelevant/);
     // Derive the selection from decoded samples, never source IDs or model timestamps.
-    return JSON.stringify({ matches: clips.filter(clip => clip.activeMs >= 990).map(clip => ({ id: clip.id, text: 'Complete audible tone' })), correctionRelevant: false });
+    return JSON.stringify({ matches: clips.filter(clip => clip.activeMs >= 990).map(clip => ({ id: clip.id, text: 'Complete audible tone' })) });
   });
   // Preserve both overlapping coarse positives: 1 coarse + 2 medium + 2 fine batches.
   assert.equal(calls.length, 5);
@@ -97,7 +100,7 @@ test('overlapping coarse positives both refine before final non-overlapping even
       if (longest * 1000 / rate >= 990) matches.push({ id, text: 'One complete audible event' });
       id = undefined;
     }
-    return JSON.stringify({ matches, correctionRelevant: false });
+    return JSON.stringify({ matches });
   });
   assert.equal(result.intervals.length, 2);
   assert.ok(result.intervals.some(hit => hit.startMs <= 1000 && hit.endMs >= 2000));
@@ -108,7 +111,7 @@ test('overlapping coarse positives both refine before final non-overlapping even
 
 test('verified parent is retained when the complete event cannot fit a finer excerpt', async () => {
   const result = await locateAudio({ ...input(), bytes: recording(12000, 3500, 6500), query: 'The whole three-second event' }, model, async parts =>
-    JSON.stringify({ matches: sources(parts).filter(clip => clip.activeMs >= 2990).map(clip => ({ id: clip.id, text: 'Whole three-second event' })), correctionRelevant: false }));
+    JSON.stringify({ matches: sources(parts).filter(clip => clip.activeMs >= 2990).map(clip => ({ id: clip.id, text: 'Whole three-second event' })) }));
   assert.deepEqual(result.intervals.map(({ startMs, endMs, basis }) => ({ startMs, endMs, basis })),
     [{ startMs: 0, endMs: 8000, basis: 'sample-window' }]);
 });
@@ -120,7 +123,7 @@ test('perception describes each actual WAV window without inventing event bounda
     assert.ok(schema.properties.windows);
     return JSON.stringify({ windows: clips.map(clip => ({ id: clip.id, text: clip.activeMs ? 'Silence followed by a tone' : 'Silence' })) });
   });
-  assert.equal(perception.kind, 'audio'); assert.equal(perception.configKey, 'sample-window-observation-v1');
+  assert.equal(perception.kind, 'audio'); assert.equal(perception.configKey, 'sample-window-observation-v3');
   assert.equal(seen[0].leadingMs, 4500);
   assert.match(perception.text, /0–8000 ms/);
   assert.match(perception.text, /excerpt bounds, not exact event times/);
@@ -133,7 +136,7 @@ test('unknown IDs, duplicates and model timestamps fail on the first classify ca
     [{ id: 'w0', text: 'x', startMs: 4500, endMs: 5500 }],
   ]) {
     let calls = 0;
-    await assert.rejects(locateAudio(input(), model, async () => { calls++; return JSON.stringify({ matches, correctionRelevant: false }); }), /audio_window_response_invalid/);
+    await assert.rejects(locateAudio(input(), model, async () => { calls++; return JSON.stringify({ matches }); }), /audio_window_response_invalid/);
     assert.equal(calls, 1);
   }
   let calls = 0;
@@ -155,4 +158,73 @@ test('unsupported visual conjunction remains empty and an unrelated Owner correc
   calls = 0;
   await assert.rejects(locateAudio(input(), model, async () => { calls++; return JSON.stringify({ matches: [], correctionRelevant: true }); }), /audio_window_response_invalid/);
   assert.equal(calls, 1);
+});
+
+
+test('audio recording corrections never become Owner input and authenticated relevance remains a strict boolean',async()=>{
+  const ordinary={...input(),query:'The Chair says correction in the recording'};
+  const result=await locateAudio(ordinary,model,async(parts,schema)=>{
+    assert.equal(schema.properties.correctionRelevant,undefined);assert.doesNotMatch(parts.at(-1).text,/correctionRelevant/);
+    assert.match(parts.at(-1).text,/recording evidence, not Owner input/);return JSON.stringify({matches:[]});
+  });
+  assert.deepEqual(result,{intervals:[],correctionRelevant:false});
+  for(const value of [true,false])await assert.rejects(locateAudio(ordinary,model,async()=>JSON.stringify({matches:[],correctionRelevant:value})),/audio_window_response_invalid/);
+  const corrected={...ordinary,correction:'Owner explicitly supplies this correction'};
+  assert.deepEqual(await locateAudio(corrected,model,async(_parts,schema)=>{
+    assert.deepEqual(schema.properties.correctionRelevant,{type:'BOOLEAN'});assert.ok(schema.required.includes('correctionRelevant'));
+    return JSON.stringify({matches:[],correctionRelevant:true});
+  }),{intervals:[],correctionRelevant:true});
+  for(const value of [undefined,'true',1])await assert.rejects(locateAudio(corrected,model,async()=>JSON.stringify({matches:[],correctionRelevant:value})),/audio_window_response_invalid/);
+});
+
+
+test('audio observation separates system instructions from question data and actual inline evidence',async()=>{
+  let calls=0;
+  const question='Could there be a short bell? Describe it if the audio supports it.';
+  const audible=recording(331,0,0);audible.writeInt16LE(1,44);
+  const result=await perceiveAudio('audio/wav',audible,{...timeline,durationMs:331},model,async(parts,schema,system)=>{
+    calls++;assert.ok(schema.properties.windows);
+    assert.match(system,/using only its inline audio as audible evidence/);
+    assert.match(system,/neither is audio, a transcript, or evidence/);
+    assert.match(system,/Never report a question, marker, or task instruction as speech or sound/);
+    assert.match(system,/unintelligible.*without guessing/);
+    assert.equal(system.includes(question),false,'caller question stays user data');
+    const textParts=parts.filter(part=>part.text).map(part=>part.text);
+    assert.equal(textParts.length,2);assert.match(textParts[0],/^SOURCE WINDOW w0\./);
+    assert.equal(textParts[1],`REINSPECTION QUESTION DATA (not audio evidence): ${JSON.stringify(question)}`);
+    assert.equal(parts.filter(part=>part.inlineData).length,1);
+    assert.ok(textParts.every(value=>!value.includes('Describe EACH')));
+    return JSON.stringify({windows:[{id:'w0',text:'No audible speech in this excerpt.'}]});
+  },question);
+  assert.equal(calls,1);assert.equal(result.configKey,'sample-window-observation-v3');
+  assert.match(result.text,/No audible speech/);assert.equal(result.text.includes(question),false);
+});
+
+
+test('exact 331ms digital silence bypasses only native perception while one minimal nonzero sample still uses it',async()=>{
+  const bytes=recording(331,0,0),original=Buffer.from(bytes),t={...timeline,durationMs:331};let calls=0;
+  const inspect=async(parts)=>{calls++;return JSON.stringify({windows:[{id:'w0',text:'An unclassified nonzero signal.'}]});};
+  const silence=await perceiveAudio('audio/wav',bytes,t,model,inspect,'Could there be a bell?');
+  assert.equal(calls,0);assert.equal(silence.model,'pcm-sample-inspection');assert.equal(silence.configKey,'sample-window-observation-v3');
+  assert.equal(silence.text,'[Audio window 0–331 ms; these are excerpt bounds, not exact event times] All decoded PCM samples in this window are exactly zero (digital silence).');
+  assert.deepEqual(bytes,original);
+  bytes.writeInt16LE(1,44);
+  const nonzero=await perceiveAudio('audio/wav',bytes,t,model,inspect);
+  assert.equal(calls,1);assert.equal(nonzero.model,model);assert.match(nonzero.text,/nonzero signal/);
+  assert.equal(bytes.readInt16LE(44),1);
+});
+
+test('mixed batch preserves original nonzero window id, bytes, positions and explicit observation provenance',async()=>{
+  const bytes=recording(20000,10000,11000),original=Buffer.from(bytes);let calls=0;
+  const result=await perceiveAudio('audio/wav',bytes,{...timeline,durationMs:20000},model,async(parts)=>{
+    calls++;const clips=sources(parts);assert.deepEqual(clips.map(c=>c.id),['w1']);
+    assert.equal(clips[0].activeMs,1000);
+    return JSON.stringify({windows:[{id:'w1',text:'A tone is audible.'}]});
+  });
+  assert.equal(calls,1);assert.equal(result.model,`${model}+pcm-sample-inspection`);
+  assert.equal(result.text.split('\n').length,3);
+  assert.match(result.text,/Audio window 0–8000 ms.*digital silence/);
+  assert.match(result.text,/Audio window 6000–14000 ms.*A tone is audible/);
+  assert.match(result.text,/Audio window 12000–20000 ms.*digital silence/);
+  assert.deepEqual(bytes,original);
 });

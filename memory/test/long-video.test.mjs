@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 import { LongVideo } from '../dist/long-video.js';
 import { MemoryError } from '../dist/service.js';
 const bytes = new Uint8Array(readFileSync(new URL('fixtures/blue-tone.mp4', import.meta.url)));
-function harness() {
-  const rows = new Map(), blobs = new Map([['root.mp4', bytes]]), calls = [];
+function harness(original = bytes) {
+  const rows = new Map(), blobs = new Map([['root.mp4', original]]), calls = [];
   const db = { async get(k) { return structuredClone(rows.get(k)); }, async set(k,v) { rows.set(k,structuredClone(v)); }, async delete(k) { rows.delete(k); }, async transaction(fn) { const before = structuredClone(rows); try { return await fn(); } catch(e) { rows.clear(); for(const [k,v] of before) rows.set(k,v); throw e; } }, async page(prefix, after, limit) { calls.push({prefix,limit}); const keys = [...rows.keys()].filter(k => k.startsWith(prefix) && (!after || k > after)).sort(); return {entries:keys.slice(0,limit).map(key=>({key,value:structuredClone(rows.get(key))})),...(keys.length>limit?{nextCursor:keys[limit-1]}:{})}; } };
   const service = { db, blobs:{async put(k,b){blobs.set(k,b)},async get(k){return blobs.get(k)??null}}, models:{},
     async source(ref,pending=false) { const s=await db.get(`source:${ref.sourceId}`); if(!s||JSON.stringify(s.ref)!==JSON.stringify(ref)) throw Error('source_changed'); if(s.state!=='active'&&!(pending&&s.state==='pending'))throw Error('source_unavailable'); return s; },
@@ -217,4 +217,48 @@ test('uncertain compaction marks application coverage loss sticky while later cl
   const before=await h.manager.status('reason-loss');assert.equal(before.reasoning.coverageIncomplete,true);assert.equal(before.contextCoverage.complete,false);
   await h.manager.step('reason-loss');const after=await h.manager.status('reason-loss');
   assert.ok(after.cursorMs>before.cursorMs);assert.equal(after.reasoning.coverageIncomplete,true);assert.equal(after.reasoning.incomplete,true);assert.equal(after.reasoning.requireMore,true);assert.equal(after.reasoning.conclusion.status,'unknown');assert.equal(after.historyCounts.events,17);
+});
+
+
+test('long audio shares durable ingest, native reasoning and whole-source recovery without losing originals', async () => {
+  const original = new Uint8Array(readFileSync(new URL('fixtures/tone.wav', import.meta.url)));
+  const h = harness(original);
+  const input = {...create, mimeType:'audio/wav', seconds:0.4};
+  const {ref} = await h.manager.create(input);
+  for (let i=0;i<3;i++) await h.manager.step('upload');
+  assert.equal((await h.manager.status('upload')).state,'complete');
+  const source = await h.service.source(ref);
+  assert.equal(source.timeline.hasVideo,false);
+  assert.equal(source.timeline.hasAudio,true);
+  const read = await h.manager.read(ref,{startMs:201,endMs:601});
+  assert.equal(read.mimeType,'audio/wav'); assert.equal(read.parser.kind,'audio');
+  assert.equal(read.offsetMs,201); assert.equal(read.actual.endMs,601);
+  assert.deepEqual(await h.service.blobs.get('root.mp4'),original);
+  h.service.models.reasonVideoClip = async input => {
+    assert.equal(input.mimeType,'audio/wav'); assert.equal(input.timeline.hasVideo,false);
+    return {...input.prior,model:'stub-audio'};
+  };
+  await h.manager.createReason({ref,query:'What is heard?',operationId:'audio-reason'});
+  for(let i=0;i<4;i++) await h.manager.step('audio-reason');
+  assert.equal((await h.manager.status('audio-reason')).state,'complete');
+  const rebuilt = await h.manager.rebuild(ref,'audio-correction',undefined,'Owner correction');
+  assert.equal(rebuilt.ref.revision,2);
+  assert.equal((await h.manager.status('audio-correction')).cursorMs,0);
+  await assert.rejects(h.manager.read(ref,{startMs:0,endMs:100}),/source_changed/);
+});
+
+
+test('audio unknown effects require explicit whole-source recovery and never replay an old model operation',async()=>{
+  const original = new Uint8Array(readFileSync(new URL('fixtures/tone.wav',import.meta.url))),h=harness(original);
+  await assert.rejects(h.manager.create({...create,mimeType:'audio/wav',seconds:181}),/audio_segment_duration_limit/);
+  const {ref}=await h.manager.create({...create,mimeType:'audio/wav'});
+  h.service.form=async()=>{throw Error('audio_provider_receipt_unknown');};
+  await assert.rejects(h.manager.step('upload'),/audio_provider_receipt_unknown/);
+  assert.equal((await h.manager.status('upload')).state,'unknown');
+  let calls=0;h.service.form=async()=>{calls++;};
+  await h.manager.step('upload');assert.equal(calls,0);
+  const recovered=await h.manager.recover({previousOperationId:'upload',operationId:'audio-recovery',acceptUnknown:true});
+  assert.equal(recovered.ref.revision,ref.revision+1);assert.equal((await h.manager.status('audio-recovery')).cursorMs,0);
+  assert.equal((await h.manager.status('upload')).state,'superseded');
+  assert.deepEqual(await h.service.blobs.get('root.mp4'),original);
 });

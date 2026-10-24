@@ -51,9 +51,9 @@ test('gateway rejects invalid or oversized JSON before service invocation', asyn
   assert.equal((await f.request('/search', { text: 'x'.repeat(12 * 1024 * 1024) })).status, 413);
   assert.equal(f.calls.length, 0);
 });
-test('raw video bytes and upload metadata survive with only trusted principal', async () => {
+for (const kind of ['video', 'audio']) test(`raw ${kind} bytes and upload metadata survive with only trusted principal`, async () => {
   const f = fixture(), bytes = new Uint8Array([0, 255, 3, 128]);
-  const response = await gateway.fetch(new Request('https://public.example/video/part', { method: 'POST',
+  const response = await gateway.fetch(new Request(`https://public.example/${kind}/part`, { method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-length': String(bytes.length),
       'memory-upload': 'upload-1', 'memory-part': '2', 'memory-principal': '{"ownerRef":"evil"}' }, body: bytes }), f.env);
   assert.equal(response.status, 200);

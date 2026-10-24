@@ -14,10 +14,33 @@ test('Workers static MP3 decoder rejects compile, returns original-time PCM wind
   }
   modules['test-entry.js']={type:'esm',contents:`
     import {prepareAudio} from './audio.js';
+    import {inspectLongAudio,sliceLongAudio} from './long-audio.js';
     WebAssembly.compile=()=>{throw Error('runtime_compile_forbidden');};
     WebAssembly.compileStreaming=()=>{throw Error('runtime_compile_forbidden');};
     export default {async fetch(request){
       const bytes=new Uint8Array(await request.arrayBuffer());
+      const url=new URL(request.url);
+      if(url.pathname==='/long') {
+        let reads=0,maxRead=0;
+        const generated=url.searchParams.has('generated');
+        const media={size:generated?384*10000-Number(url.searchParams.get('cut')||0):bytes.length,async read(offset,length){
+          reads+=length;maxRead=Math.max(maxRead,length);
+          if(!generated)return bytes.slice(offset,offset+length);
+          const out=new Uint8Array(length),header=[255,251,148,0];
+          for(let i=0;i<length;i++){const at=(offset+i)%384;if(at<4)out[i]=header[at];}
+          return out;
+        }};
+        const before=performance.now(),timeline=await inspectLongAudio('audio/mpeg',media),inspectMs=performance.now()-before;
+        if(url.searchParams.has('inspect')) return Response.json({timeline});
+        const startMs=generated?239000:100,endMs=generated?240000:200;
+        const beforeSlice=performance.now(),clip=await sliceLongAudio('audio/mpeg',media,{startMs,endMs},timeline),sliceMs=performance.now()-beforeSlice;
+        let same=true;
+        if(!generated){
+          const audio=await prepareAudio('audio/mpeg',bytes,timeline);
+          try{const comparison=await audio.window(startMs,endMs);same=comparison.bytes.length===clip.bytes.length&&comparison.bytes.every((v,i)=>v===clip.bytes[i]);}finally{audio.dispose();}
+        }
+        return Response.json({timeline,actual:clip.actual,length:clip.bytes.length,same,reads,maxRead,inspectMs,sliceMs});
+      }
       const durationMs=Number(new URL(request.url).searchParams.get('duration'));
       const audio=await prepareAudio('audio/mpeg',bytes,{durationMs,hasAudio:true,hasVideo:false});
       try{
@@ -37,6 +60,24 @@ test('Workers static MP3 decoder rejects compile, returns original-time PCM wind
     const result=await response.json();
     assert.ok(Math.abs(result.durationMs-timeline.durationMs)<=1);
     assert.ok(result.startMs>=100&&result.endMs<=200);
+    const longResponse=await mf.dispatchFetch('http://test/long',{method:'POST',body:bytes});
+    assert.equal(longResponse.status,200,await longResponse.clone().text());
+    const long=await longResponse.json();assert.equal(long.same,true);assert.ok(long.maxRead<=4096);
+    for(const removed of [1,100,300]){
+      const truncated=await mf.dispatchFetch('http://test/long?inspect=1',{method:'POST',body:bytes.slice(0,-removed)});
+      assert.equal(truncated.status,500);assert.match(await truncated.text(),/audio_mp3_frame_incomplete/);
+    }
+    const tagged=new Uint8Array(bytes.length+128);tagged.set(bytes);tagged.set([84,65,71],bytes.length);
+    const tagResponse=await mf.dispatchFetch('http://test/long?inspect=1',{method:'POST',body:tagged});
+    assert.equal(tagResponse.status,200,await tagResponse.clone().text());assert.deepEqual((await tagResponse.json()).timeline,long.timeline);
+    const truncatedLong=await mf.dispatchFetch('http://test/long?generated=1&inspect=1&cut=1',{method:'POST'});
+    assert.equal(truncatedLong.status,500);assert.match(await truncatedLong.text(),/audio_mp3_frame_incomplete/);
+    const generated=await mf.dispatchFetch('http://test/long?generated=1',{method:'POST'});
+    assert.equal(generated.status,200,await generated.clone().text());
+    const streamed=await generated.json();
+    assert.equal(streamed.timeline.durationMs,240000);assert.deepEqual(streamed.actual,{startMs:239000,endMs:240000});
+    assert.equal(streamed.length,192044);assert.ok(streamed.maxRead<=4096);
+    console.log('240s generated MP3 bounded decode timings',JSON.stringify(streamed));
     assert.equal(result.header[20],1); assert.equal(result.header[22],2); assert.equal(result.header[34],16);
     const wrong=await mf.dispatchFetch('http://test/?duration=900',{method:'POST',body:bytes});
     assert.equal(wrong.status,500); assert.match(await wrong.text(),/audio_timeline_mismatch/);

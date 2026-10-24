@@ -1,7 +1,7 @@
 import { BufferSource, EncodedPacketSink, Input, MP3, WAVE } from 'mediabunny';
 import { MemoryError, type Timeline } from './service.js';
 
-export interface AudioWindow { mimeType: 'audio/wav'; bytes: Uint8Array; startMs: number; endMs: number }
+export interface AudioWindow { mimeType: 'audio/wav'; bytes: Uint8Array; startMs: number; endMs: number; digitalSilence: boolean }
 export interface PreparedAudio {
   durationMs: number;
   maxWindowMs: number;
@@ -12,7 +12,7 @@ export interface PreparedAudio {
 // Per-isolate resource permit only: no decoded media is retained in module state.
 let audioInUse = false;
 const audioWaiters: (() => void)[] = [];
-async function acquireAudio(): Promise<() => void> {
+export async function acquireAudio(): Promise<() => void> {
   if (audioInUse) {
     if (audioWaiters.length >= 4) throw new MemoryError('audio_busy', 503);
     await new Promise<void>(resolve => audioWaiters.push(resolve));
@@ -138,8 +138,18 @@ export async function prepareAudio(mimeType: string, bytes: Uint8Array, timeline
           ascii(fact, 'fact'); view.setUint32(fact + 4, 4, true); view.setUint32(fact + 8, end - start, true);
         }
         ascii(dataHeader, 'data'); view.setUint32(dataHeader + 4, length, true);
-        result.set(pcm.subarray(start * blockAlign, end * blockAlign), dataHeader + 8);
-        return { mimeType: 'audio/wav', bytes: result, startMs: start / sampleRate * 1000, endMs: end / sampleRate * 1000 };
+        const selected = pcm.subarray(start * blockAlign, end * blockAlign);
+        result.set(selected, dataHeader + 8);
+        // Exact decoded-sample identity, never an energy threshold or speech detector.
+        let digitalSilence: boolean;
+        if (formatTag === 3) {
+          const samples = new DataView(selected.buffer, selected.byteOffset, selected.byteLength);
+          digitalSilence = true;
+          for (let at = 0; at < selected.length; at += 4) {
+            if (samples.getFloat32(at, true) !== 0) { digitalSilence = false; break; }
+          }
+        } else digitalSilence = selected.every(value => value === (sampleBytes === 1 ? 128 : 0));
+        return { mimeType: 'audio/wav', bytes: result, digitalSilence, startMs: start / sampleRate * 1000, endMs: end / sampleRate * 1000 };
       },
       dispose() { pcm = undefined; release(); },
     };

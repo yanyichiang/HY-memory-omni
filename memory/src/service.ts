@@ -26,6 +26,7 @@ export interface Source {
   state: 'pending' | 'active' | 'deleted' | 'revoked'; perception?: Perception;
   vector?: Vector; correction?: string; cleanupPending?: boolean; timeline?: Timeline;
   clip?: { original: SourceRef; logical: TimeRange; actual: TimeRange; offsetMs: number };
+  // Historical serialized plan key shared by long audio/video roots; MIME and timeline identify modality.
   video?: { strategy: 'fixed' | 'dynamic'; seconds: number; minDurationMs: number; cursorMs: number; complete: boolean };
   derivedFrom?: SourceRef[]; verification?: Perception; observedAt?: string; reinspectionQuestion?: string;
 }
@@ -451,20 +452,22 @@ export class MemoryService {
     if (revision !== await this.revision()) throw new MemoryError('memory_changed_during_search');
     const knowledge = await this.knowledge(results.flatMap(item => item.refs.map(ref => ref.sourceId)));
     const videos = new Map<string, { ref: SourceRef; clips: { ref: SourceRef; startMs: number; endMs: number; rank: number; text: string }[] }>();
+    const audios = new Map<string, { ref: SourceRef; clips: { ref: SourceRef; startMs: number; endMs: number; rank: number; text: string }[] }>();
     for (const [rank, item] of results.entries()) for (const ref of item.refs) {
       const source = await this.source(ref);
       if (!source.clip) continue;
       const original = source.clip.original, key = sourceKey(original);
-      const group = videos.get(key) ?? { ref: original, clips: [] };
+      const groups = source.timeline?.hasVideo ? videos : audios;
+      const group = groups.get(key) ?? { ref: original, clips: [] };
       const observations = item.groundings?.filter(g => g.ref.sourceId === ref.sourceId) ?? [];
       for (const match of observations) {
         const startMs = Math.max(source.clip.logical.startMs, Math.floor(match.startMs + source.clip.offsetMs));
         const endMs = Math.min(source.clip.logical.endMs, Math.ceil(match.endMs + source.clip.offsetMs));
         if (startMs < endMs && !group.clips.some(c => c.ref.sourceId === ref.sourceId && c.startMs === startMs && c.endMs === endMs)) group.clips.push({ ref, startMs, endMs, rank: rank + 1, text: match.text });
       }
-      if (group.clips.length) videos.set(key, group);
+      if (group.clips.length) groups.set(key, group);
     }
-    return { revision, items: results, knowledge, videos: [...videos.values()], coverage: { scope: 'retrieved-candidates' as const, exhaustive: false as const,
+    return { revision, items: results, knowledge, videos: [...videos.values()], audios: [...audios.values()], coverage: { scope: 'retrieved-candidates' as const, exhaustive: false as const,
       candidateLimit: 20 as const, candidates: ranked.length, examinedSources: grounded.size + images.size, returned: results.length,
       remainingCandidates: ranked.length - examinedCandidates, absence: 'not-established' as const, limitations: [...new Set(limitations)] } };
   }

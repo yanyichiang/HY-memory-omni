@@ -37,7 +37,7 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
       const body = await request.json();
       let content = 'A red badge marked 17.';
       if (body.messages[0].content.startsWith('Verify image retrieval')) {
-        content = JSON.stringify({ matches: true, text: 'Visible fixture badge.', correctionRelevant: false });
+        content = JSON.stringify({ matches: true, text: 'Visible fixture badge.', ...(body.messages[1].content.at(-1).text.includes('correctionRelevant:boolean') ? {correctionRelevant:false} : {}) });
       } else if (body.messages[0].content.startsWith('Project the supplied current Hy L2 memories')) {
         const input = JSON.parse(body.messages[1].content);
         assert.ok(input.nodes.length);
@@ -61,14 +61,14 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
         const ids = body.contents[0].parts.flatMap(part => /^SOURCE WINDOW (w\d+)\./.exec(part.text ?? '')?.slice(1) ?? []);
         assert.ok(ids.length);
         const items = ids.map(id => ({ id, text: 'An audible synthetic tone.' }));
-        const answer = schema.properties.windows ? { windows: items } : { matches: items, correctionRelevant: false };
+        const answer = schema.properties.windows ? { windows: items } : { matches: items, ...(schema.properties.correctionRelevant ? {correctionRelevant:false} : {}) };
         return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(answer) }] } }] });
       }
       const native = body.contents[0].parts[0].inlineData;
       assert.ok(native.data.length > 100);
       const audioOnly = native.mimeType.startsWith('audio/');
       return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: body.generationConfig.responseSchema
-        ? JSON.stringify({ correctionRelevant: false, intervals: [{ startMs: 100, endMs: 800, text: 'A blue frame and a synthetic tone.', modalities: audioOnly ? ['audio'] : ['video', 'audio'] }] })
+        ? JSON.stringify({ ...(schema.properties.correctionRelevant ? {correctionRelevant:false} : {}), intervals: [{ startMs: 100, endMs: 800, text: 'A blue frame and a synthetic tone.', modalities: audioOnly ? ['audio'] : ['video', 'audio'] }] })
         : 'A blue frame and a synthetic tone.' }] } }] });
     }
     throw new Error(`unexpected outbound ${url.pathname}`);

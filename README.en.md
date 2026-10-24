@@ -105,6 +105,8 @@ The first start installs the pinned Python Workers dependencies and builds the T
 The repository also supports creating a source package with `npm pack`. In a new directory, run:
 
 ```sh
+npm init -y
+npm pkg set overrides.undici=7.30.1
 npm install /path/to/hy-memory-omni-0.1.0.tgz
 npx --no-install hy-memory-omni init
 # Edit .hy-memory-omni/config.json
@@ -112,6 +114,8 @@ npx --no-install hy-memory-omni start
 ```
 
 The source package includes source code, npm-shrinkwrap / pylock, and licenses. Runtime dependencies are prepared on the first start after installation. This project has not been published to the npm registry.
+
+Set `overrides` in the consuming project’s root `package.json`. npm does not inherit overrides from dependencies; a local tarball install must not assume its bundled lockfile enforced them. The commands above pin the patched HTTP dependency. Source clones already contain this setting and use `npm ci`. See [npm’s override rules](https://docs.npmjs.com/cli/v10/configuring-npm/package-json/#overrides).
 
 </details>
 
@@ -191,7 +195,7 @@ See the [API reference](docs/API.md) for complete examples covering audio, video
 - The service listens on loopback only by default. Application APIs require the Memory API token; `/health` is the exception.
 - Each instance serves one trusted Owner within the `personal` scope. Different Owners use separate configuration, state, and credentials. Callers cannot select another identity.
 - A state lock prevents multiple processes from opening the same data simultaneously. After an abnormal exit, confirm that the original process has stopped before handling a leftover `runtime.lock`.
-- Local startup does not deploy cloud Workers or create cloud storage. The repository's Wrangler configurations are deployment templates; cloud deployment requires separate resource, binding, and secret configuration.
+- Local startup does not deploy cloud resources. `npm run cloud -- init/plan/render/deploy` provides a separate installation path for the private engine, storage and authenticated gateway. Read the [deployment guide](docs/DEPLOY.md) first.
 
 <details>
 <summary><strong>Configuration overrides and setup options</strong></summary>
@@ -230,7 +234,13 @@ When `npm start` receives a normal stop signal, it cancels active dependency pre
 | Four-modality lifecycle | Ingest, restart, recall, original retrieval, revision, and revocation passed for text / images / audio / video |
 | Access boundaries | Authentication, trusted identity injection, video chunking, and isolation of the internal read endpoint passed |
 
-Four-modality lifecycle acceptance runs real workerd, Hy Writer / Reader, SQLite, and R2; **models use test adapters** (TS HTTP interception and Python fixture model adapters). These results demonstrate standalone installation and component integration. They do not constitute a new evaluation of semantic quality with live models. See the [acceptance record](docs/ACCEPTANCE.md) for the full scope, issues encountered, and fixes.
+Four-modality lifecycle acceptance runs real workerd, Hy Writer / Reader, SQLite, and R2; **models use test adapters** (TS HTTP interception and Python fixture model adapters). These tests demonstrate standalone installation and component integration; the separate live-provider runs preserve first answers, failures and independent semantic review. See the [acceptance record](docs/ACCEPTANCE.md) for the full scope, issues encountered, and fixes.
+
+### Live-provider acceptance
+
+`npm run test:live` uses the configured real models, production Python entrypoint, authenticated gateway and independent temporary storage. Set `HY_LIVE_OUTPUT` to a new private directory. `HY_LIVE_PROFILE=knowledge` or `media` selects the governance or audiovisual cases; the default is `all`. First API/model responses and usage are retained without automatic retry or failure overwrites. After machine checks, review answer meaning, native evidence and revision targets against the fixed script; the report explicitly records that semantic review is still required. The command invokes your models; never commit its output or credentials.
+
+Cases cover cross-source conflict, explicit revision, withdrawal recomputation, original-image reinspection, native-media recall, recording segmentation/grouping and cross-clip conclusions. See the [acceptance record](docs/ACCEPTANCE.md) for executed results; these synthetic regression cases are not a general accuracy benchmark.
 
 <details>
 <summary><strong>Development and verification commands</strong></summary>
@@ -245,7 +255,7 @@ npm run test:memory
 npm pack
 ```
 
-`test:install` creates isolated temporary state; `test:memory` retains the existing memory regression tests. Installation may use tool download caches. Acceptance does not claim installation on a bare operating system or over a network without caches.
+`test:install` creates isolated temporary state; `test:memory` retains the existing memory regression tests. Installation may use tool download caches; a separate empty project-dependency-cache run verified downloads from the default sources, as recorded in acceptance. This is not a bare operating-system installation.
 
 </details>
 
@@ -254,8 +264,9 @@ npm pack
 - “omni” covers the implemented **text, image, audio, and video** modalities. Supported media formats and codecs depend on the API.
 - There is no application-level fixed **2,000-memory total limit**. Request pagination, media size, context windows, and underlying platform capacity retain their respective constraints.
 - Retrieval returns a bounded candidate set. No hit does not prove that relevant evidence is absent; grouping segments by video also does not mean cross-segment reasoning has reached a conclusion.
+- Cross-clip reasoning event timestamps are model estimates and may be inaccurate even when the conclusion is correct. New events identify this basis and the supplied media window; inspect native evidence through the archived `clipRef`.
 - The current editing unit is a **whole-source rebuild**. Individual fact editing is not yet available.
-- Ordinary media ingestion accepts original files up to 8 MiB; audio lasts at most 180 seconds and short video at most 120 seconds. Media queries accept original files up to 2 MiB. Long videos use the job API; long-audio segmentation is not implemented. See [API documentation](docs/API.md) for formats and errors.
+- Ordinary media ingestion accepts original files up to 8 MiB; audio lasts at most 180 seconds and short video at most 120 seconds. Media queries accept original files up to 2 MiB. Long videos use the job API; long audio uses its own multipart task API with fixed/dynamic segmentation, grouping and explicit cross-clip reasoning. See [compatibility](docs/MEDIA.md). See [API documentation](docs/API.md) for formats and errors.
 
 ## Documentation and Contributions
 
@@ -271,6 +282,8 @@ When reporting an issue, include the version, minimal reproduction steps, and re
 Original code and documentation are released by **YY** under [Apache-2.0](LICENSE). Thanks to [Tencent Hy-Memory](https://github.com/Tencent-Hunyuan/Hy-Memory) for the memory engine. Original attribution and licensing are preserved in [NOTICE](NOTICE) and [UPSTREAM-LICENSE](engine/UPSTREAM-LICENSE). This is an independent derivative project, without official Tencent endorsement or product affiliation.
 
 Mediabunny, MP3 decoding components, and Python dependencies retain their respective MPL / LGPL / MIT and other licenses. See [third-party license notices](THIRD_PARTY_NOTICES.md). Current distribution contains source code; redistribution of precompiled WASM, containers, or complete runtime environments must meet the obligations of the included components.
+
+
 
 ---
 

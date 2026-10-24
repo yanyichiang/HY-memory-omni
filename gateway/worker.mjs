@@ -7,6 +7,8 @@ const ROUTES = new Set([
   '/recover', '/revision', '/video/upload', '/video/part', '/video/abort-upload',
   '/video/complete-upload', '/video/status', '/video/events', '/video/step',
   '/video/reason', '/video/recover',
+  '/audio/upload', '/audio/part', '/audio/abort-upload', '/audio/complete-upload',
+  '/audio/status', '/audio/events', '/audio/step', '/audio/reason', '/audio/recover',
 ]);
 const encoder = new TextEncoder();
 function error(code, status) {
@@ -60,7 +62,7 @@ export default {
     }
     if (!await authorized(request, env.HY_API_TOKEN)) return error('unauthorized', 401);
     const principal = { ownerRef: env.HY_OWNER_REF, scopeRef: 'personal' };
-    const raw = url.pathname === '/video/part';
+    const raw = url.pathname === '/video/part' || url.pathname === '/audio/part';
     const headers = new Headers();
     let declaredSize;
     if (raw) {

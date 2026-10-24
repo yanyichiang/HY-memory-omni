@@ -105,6 +105,8 @@ npm start
 仓库也支持 `npm pack` 生成源码包。在新目录中执行：
 
 ```sh
+npm init -y
+npm pkg set overrides.undici=7.30.1
 npm install /path/to/hy-memory-omni-0.1.0.tgz
 npx --no-install hy-memory-omni init
 # 编辑 .hy-memory-omni/config.json
@@ -112,6 +114,8 @@ npx --no-install hy-memory-omni start
 ```
 
 源码包包含源码、npm-shrinkwrap / pylock 和许可证，运行依赖在安装后的首次启动时准备。本项目暂未发布到 npm registry。
+
+`overrides` 必须设在安装者项目的根 `package.json`；npm 不继承依赖包中的 overrides，本地 tarball 安装也不能据此假定锁文件已生效。上面的命令固定修补后的 HTTP 依赖。源码克隆路径已有这项设置，直接 `npm ci` 即可。见 [npm 的 overrides 规则](https://docs.npmjs.com/cli/v10/configuring-npm/package-json/#overrides)。
 
 </details>
 
@@ -191,7 +195,7 @@ const original = await memory('/read', { ref: saved.ref });
 - 默认仅监听本机回环地址。除 `/health` 外，业务 API 需要 Memory API token。
 - 每个实例对应一个可信 Owner 和 `personal` 范围；不同 Owner 使用独立配置、状态与凭据。调用者不能自行指定另一个身份。
 - 状态锁阻止多个进程同时打开同一份数据。非正常退出后，先确认原进程已停止，再处理残留 `runtime.lock`。
-- 本地启动不会部署云端 Worker 或创建云端存储；仓库中的 Wrangler 配置为部署模板，云端部署需另行配置资源、绑定与密钥。
+- 本地启动不会部署云端资源。`npm run cloud -- init/plan/render/deploy` 提供独立云安装入口，按顺序建立私有引擎、存储和带认证的网关；先阅读[部署指南](docs/DEPLOY.md)。
 
 <details>
 <summary><strong>配置覆盖与安装选项</strong></summary>
@@ -230,7 +234,13 @@ const original = await memory('/read', { ref: saved.ref });
 | 四模态生命周期 | 文本 / 图像 / 音频 / 视频的写入、重启、召回、原件读取、修订与撤销通过 |
 | 访问边界 | 认证、可信身份注入、视频分片及内部读取接口隔离通过 |
 
-四模态生命周期验收运行真实 workerd、Hy Writer / Reader、SQLite 和 R2；**模型使用测试适配器**（TS HTTP 拦截与 Python fixture 模型适配）。这些结果证明独立安装与组件贯通，不等同于新增真实模型语义质量评测。完整范围、遇到的问题与修复见 [验收记录](docs/ACCEPTANCE.md)。
+四模态生命周期验收运行真实 workerd、Hy Writer / Reader、SQLite 和 R2；**模型使用测试适配器**（TS HTTP 拦截与 Python fixture 模型适配）。这组结果证明独立安装与组件贯通；新增真实模型测试另行记录首次回答、失败及独立语义复核。完整范围、遇到的问题与修复见 [验收记录](docs/ACCEPTANCE.md)。
+
+### 真实模型验收
+
+`npm run test:live` 使用当前配置的真实模型、生产 Python 入口、认证网关和独立临时存储。必须把 `HY_LIVE_OUTPUT` 设为新的私有目录；可用 `HY_LIVE_PROFILE=knowledge` 或 `media` 分别运行知识治理和音视频场景，默认 `all`。结果保存首次 API / 模型响应及 usage，不自动重试或覆盖失败。自动检查完成后，还须对照固定剧本复核回答含义、原始证据及修订指向；报告明确保留这项人工语义复核。该命令会调用你的模型；不要把输出目录或凭据提交到 Git。
+
+它覆盖合成会议的跨来源冲突、显式修订与撤销重算、原图重检、原生媒体召回、音视频分片/分组/跨片结论。实际执行结果见[验收记录](docs/ACCEPTANCE.md)，用例通过不代表任意资料上的通用准确率。
 
 <details>
 <summary><strong>开发与验证命令</strong></summary>
@@ -245,7 +255,7 @@ npm run test:memory
 npm pack
 ```
 
-`test:install` 创建隔离临时状态；`test:memory` 保留既有记忆回归测试。安装可使用工具下载缓存，验收没有声称在空操作系统或无缓存网络环境下完成。
+`test:install` 创建隔离临时状态；`test:memory` 保留既有记忆回归测试。安装可使用工具下载缓存；另有一次空项目依赖缓存的默认源下载验证，见验收记录。这不等于在空操作系统上安装。
 
 </details>
 
@@ -254,8 +264,9 @@ npm pack
 - “omni” 覆盖当前实现的**文本、图像、音频与视频**，具体媒体格式和编解码器以 API 支持为准。
 - 没有应用级固定的 **2,000 条记忆总量上限**；请求分页、媒体大小、上下文窗口及底层平台容量仍有各自约束。
 - 检索返回有界候选集合。没有命中不能证明相关证据不存在；按视频归组也不等于跨片段推理已经得出结论。
+- 跨片段推理事件的时间戳是模型估计；即使结论正确，定位也可能有偏差。新事件标注估时与供模窗口，原件核验使用归档的 `clipRef`。
 - 当前修改粒度是**整个来源重建**，尚未提供单条事实编辑。
-- 普通媒体写入上限为原文件 8 MiB；音频最长 180 秒、短视频最长 120 秒；媒体查询上限为原文件 2 MiB。长视频使用任务接口，长音频切分尚未实现。支持格式及错误说明见 [API 文档](docs/API.md)。
+- 普通媒体写入上限为原文件 8 MiB；音频最长 180 秒、短视频最长 120 秒；媒体查询上限为原文件 2 MiB。长视频和长音频使用各自的任务接口，支持固定/动态切分、按原件分组和显式跨片推理。`npm run inspect -- FILE` 可先检查格式；见[兼容性说明](docs/MEDIA.md)与 [API 文档](docs/API.md)。
 
 ## 文档与贡献
 
@@ -271,6 +282,8 @@ npm pack
 原创代码与文档由 **YY** 以 [Apache-2.0](LICENSE) 发布。感谢 [Tencent Hy-Memory](https://github.com/Tencent-Hunyuan/Hy-Memory) 提供记忆内核；原始署名与许可证保留在 [NOTICE](NOTICE) 和 [UPSTREAM-LICENSE](engine/UPSTREAM-LICENSE)。本项目为独立衍生项目，不代表腾讯官方产品或背书。
 
 Mediabunny、MP3 解码组件及 Python 依赖保留各自的 MPL / LGPL / MIT 等许可证，详见 [第三方许可证说明](THIRD_PARTY_NOTICES.md)。当前分发内容为源码；预编译 WASM、容器或完整运行环境的再分发需要遵守所含组件的对应义务。
+
+
 
 ---
 

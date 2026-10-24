@@ -20,7 +20,10 @@
     "typecheck": "tsc --noEmit -p memory/tsconfig.json",
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "test:memory": "node --test --test-concurrency=1 memory/test/*.test.mjs",
-    "test:install": "node test/install-smoke.mjs"
+    "test:install": "node test/install-smoke.mjs",
+    "inspect": "node scripts/cli.mjs inspect",
+    "cloud": "node scripts/cli.mjs cloud",
+    "test:live": "node test/live-acceptance.mjs"
   },
   "files": [
     "scripts/",
@@ -42,17 +45,25 @@
     "THIRD_PARTY_NOTICES.md",
     "memory/test/fixtures/README.md",
     "README.en.md",
-    "AGENTS.md"
+    "AGENTS.md",
+    "test/live-acceptance.mjs",
+    "test/live-fixtures/",
+    "memory/test/fixtures/tone.wav",
+    "memory/test/fixtures/synthetic-meeting-m42.mp4",
+    "npm-shrinkwrap.json"
   ],
   "dependencies": {
     "esbuild": "0.28.1",
     "miniflare": "5.20261012.0-beta",
     "mediabunny": "1.62.1",
-    "mpg123-decoder": "1.0.3"
+    "mpg123-decoder": "1.0.3",
+    "wrangler": "4.151.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261014.1",
-    "typescript": "5.9.3",
-    "wrangler": "4.151.0"
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "undici": "7.30.1"
   }
 }

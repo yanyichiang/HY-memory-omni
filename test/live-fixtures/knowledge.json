@@ -1,0 +1,57 @@
+{
+  "A": {
+    "kind": "owner-text",
+    "meeting": "M-17",
+    "scheduledDate": "2026-10-30",
+    "text": "M-17项目评审会定于2026年10月30日15:00举行。"
+  },
+  "B": {
+    "kind": "native-image",
+    "meeting": "M-17",
+    "scheduledDate": "2026-10-31",
+    "location": "ROOM A-310",
+    "expect": "conflict without explicit revision evidence"
+  },
+  "C": {
+    "kind": "native-image",
+    "meeting": "M-18",
+    "scheduledDate": "2026-11-06",
+    "location": "ROOM C-206",
+    "expect": "different meeting, not a co-reference to M-17"
+  },
+  "D": {
+    "kind": "native-image",
+    "meeting": "M-17",
+    "previousDate": "2026-10-30",
+    "scheduledDate": "2026-10-31",
+    "effectiveTime": "2026-10-23 00:00 UTC",
+    "effectiveAt": "2026-10-23T00:00:00Z",
+    "expect": "explicit world-change revision of the affected schedule dimension; unrelated historical facts stay intact"
+  },
+  "fixedOrder": [
+    "ingest A",
+    "ingest B",
+    "ingest C",
+    "knowledge conflict/different",
+    "text search knowledge closure",
+    "ingest D",
+    "knowledge revision",
+    "revoke D",
+    "knowledge original conflict restored",
+    "revoke B",
+    "knowledge excludes B/D",
+    "reinspect C original",
+    "old ref invalid/new ref byte exact",
+    "C native-image search"
+  ],
+  "semanticAcceptance": {
+    "initial": "At least one active conflict connects A/B schedule claims; both endpoints disputed. C has claims and no same/conflict/revision/uncertain cross-event link to A/B.",
+    "search": "Text search for M-17 returns knowledge closure including both endpoints of the A/B conflict.",
+    "revision": "At least one active world-change revision links an A/B schedule claim to D; its left is superseded and right supported. Each initial conflict is now inactive. This does not require every A/B identity, location, or historical-original-plan claim to be superseded.",
+    "revokeD": "D absent, each original A/B conflict active again and both endpoints disputed or unresolved.",
+    "revokeB": "B and D claims, roots and relations absent from public knowledge.",
+    "reinspectC": "Same sourceId/mediaRef, revision increments by one, old SourceRef invalid, R2 bytes identical, actual image perception request includes exact original C bytes plus non-leading question; response preserves M-18 and 2026-11-06.",
+    "nativeQuery": "Original C image used without text query; top result references current C version, no revoked source or stale C version."
+  },
+  "scoringPolicy": "First outputs only. Stop at first failed API or semantic assertion. No retry, prompt/scoring repair, fallback, or inferred permission. Ground-truth metadata is never sent to any model."
+}

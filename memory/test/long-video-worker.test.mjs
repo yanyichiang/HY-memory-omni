@@ -60,7 +60,7 @@ test('real multipart fixed video publishes all clips, groups original times, rea
        assert.ok(schema.properties.intervals,'fixed segmentation must not invoke dynamic segmentation or reasoning');
        const prompt=input.contents[0].parts.find(p=>typeof p.text==='string').text;
        const duration=Number(/duration (\d+) milliseconds/.exec(prompt)?.[1]);assert.ok(duration>0);
-       text=JSON.stringify({correctionRelevant:false,intervals:[{startMs:0,endMs:duration,text:'Fixed synthetic joint blue/tone match.',modalities:['video','audio']}]});
+       text=JSON.stringify({...(schema.properties.correctionRelevant?{correctionRelevant:false}:{}),intervals:[{startMs:0,endMs:duration,text:'Fixed synthetic joint blue/tone match.',modalities:['video','audio']}]});
      }
      return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text}]}}]});
    }

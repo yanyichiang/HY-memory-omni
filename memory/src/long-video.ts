@@ -1,5 +1,6 @@
 import { MemoryError, MemoryService, encode, sourceRef, text, timeRange, type Source, type SourceRef, type TimeRange } from './service.js';
 import { inspectLongVideo, nextFixedRange, sliceVideo, type RangeMedia } from './video.js';
+import { inspectLongAudio, sliceLongAudio } from './long-audio.js';
 import type { VideoEvidenceEvent, VideoReasonState } from './video-models.js';
 interface Job {
   kind: 'ingest' | 'reason'; operationId: string; ref: SourceRef; state: 'queued' | 'running' | 'unknown' | 'complete' | 'superseded';
@@ -39,6 +40,10 @@ export class LongVideo {
       return bytes;
     } };
   }
+  private async slice(source: Source, requested: TimeRange, pending = false) {
+    const media = await this.media(source, pending);
+    return source.timeline!.hasVideo ? sliceVideo(source.mimeType, media, requested) : sliceLongAudio(source.mimeType, media, requested, source.timeline!);
+  }
   private async queue(job: Job) {
     await this.service.db.set(`job:${job.operationId}`, job);
     await this.service.db.set(`work:${job.operationId}`, job.operationId);
@@ -47,6 +52,7 @@ export class LongVideo {
     const operationId = text(input.operationId, 80), key = text(input.key, 500), messageRef = text(input.messageRef, 160), sessionRef = text(input.sessionRef, 160);
     if (!['fixed', 'dynamic'].includes(input.strategy) || !Number.isFinite(input.seconds) || input.seconds <= 0
       || !Number.isFinite(input.minDurationMs) || input.minDurationMs <= 0) throw new MemoryError('video_plan_invalid', 400);
+    if (input.mimeType.startsWith('audio/') && (input.seconds > 180 || input.minDurationMs > 180000)) throw new MemoryError('audio_segment_duration_limit', 400);
     const binding = { key, messageRef, sessionRef, mimeType: input.mimeType, strategy: input.strategy, seconds: input.seconds, minDurationMs: input.minDurationMs };
     let previous: { old?: unknown };
     try { previous = await this.service.begin(operationId, binding); }
@@ -60,7 +66,7 @@ export class LongVideo {
     }
     if (previous.old !== undefined) return previous.old;
     try {
-      const timeline = await inspectLongVideo(input.mimeType, await this.range(key));
+      const timeline = await (input.mimeType.startsWith('audio/') ? inspectLongAudio : inspectLongVideo)(input.mimeType, await this.range(key));
       const ref = { sourceId: crypto.randomUUID(), revision: 1, mediaRef: crypto.randomUUID() };
       const source: Source = { ref, key, messageRef, sessionRef, mimeType: input.mimeType, timeline, state: 'pending', video: {
         strategy: input.strategy, seconds: input.seconds, minDurationMs: input.minDurationMs, cursorMs: 0, complete: false } };
@@ -118,9 +124,9 @@ export class LongVideo {
       if (plan.strategy === 'fixed') ranges = [window];
       else {
         if (!this.service.models.segmentVideo) throw new MemoryError('video_dynamic_model_missing', 503);
-        let clip: Awaited<ReturnType<typeof sliceVideo>>;
+        let clip: Awaited<ReturnType<LongVideo['slice']>>;
         for (;;) {
-          try { clip = await sliceVideo(source.mimeType, await this.media(source, true), window); break; }
+          try { clip = await this.slice(source, window, true); break; }
           catch (error) {
             await this.executing(job);
             if (!(error instanceof MemoryError) || error.code !== 'media_slice_too_large') throw error;
@@ -143,15 +149,15 @@ export class LongVideo {
     }
     const logical = ranges[0];
     if (!logical) { await this.publish(job); return; }
-    let clip: Awaited<ReturnType<typeof sliceVideo>>;
-    try { clip = await sliceVideo(source.mimeType, await this.media(source, true), logical); }
+    let clip: Awaited<ReturnType<LongVideo['slice']>>;
+    try { clip = await this.slice(source, logical, true); }
     catch (error) {
       if (plan.strategy === 'fixed' && error instanceof MemoryError && error.code === 'media_slice_too_large') throw new MemoryError('video_fixed_window_too_large_reduce_seconds', 413);
       throw error;
     }
     await this.executing(job);
     const childId = crypto.randomUUID(), ref = { sourceId: childId, revision: 1, mediaRef: crypto.randomUUID() };
-    const child: Source = { ref, key: `${source.key}.clips/${source.ref.revision}/${childId}.mp4`, mimeType: clip.mimeType, messageRef: source.messageRef, sessionRef: source.sessionRef,
+    const child: Source = { ref, key: `${source.key}.clips/${source.ref.revision}/${childId}.${clip.mimeType === 'audio/wav' ? 'wav' : 'mp4'}`, mimeType: clip.mimeType, messageRef: source.messageRef, sessionRef: source.sessionRef,
       timeline: clip.timeline, state: 'pending', derivedFrom: [source.ref], clip: { original: source.ref, logical, actual: clip.actual, offsetMs: clip.offsetMs },
       ...(source.correction ? { correction: source.correction } : {}), ...(source.reinspectionQuestion ? { reinspectionQuestion: source.reinspectionQuestion } : {}) };
     const clipOp = `${job.operationId}:clip:${logical.startMs}`;
@@ -255,12 +261,12 @@ export class LongVideo {
     const source = await this.service.source(sourceRef(ref));
     if (!source.video?.complete || !source.timeline) throw new MemoryError('source_not_complete_video', 400);
     const selection = timeRange(requested, source.timeline);
-    const clip = await sliceVideo(source.mimeType, await this.media(source), selection);
+    const clip = await this.slice(source, selection);
     await this.service.source(ref);
     return { ref: source.ref, mimeType: clip.mimeType, dataBase64: encode(clip.bytes), timeline: source.timeline, outputTimeline: clip.timeline,
       selection, actual: clip.actual, offsetMs: clip.offsetMs, originalIsFullFile: false, perceptionText: '',
       provenance: { roots: [source.ref.sourceId], derivedFrom: [], independence: 'not-established' },
-      parser: { model: 'container', configKey: 'native-range-remux-v1', kind: 'video' } };
+      parser: { model: source.mimeType === 'audio/mpeg' ? 'mpg123-decoder/1.0.3' : 'container', configKey: source.timeline.hasVideo ? 'native-range-remux-v1' : 'native-audio-sample-range-v1', kind: source.timeline.hasVideo ? 'video' : 'audio' } };
   }
   async createReason(input: { ref: SourceRef; query: string; operationId: string }) {
     const ref = sourceRef(input.ref), query = text(input.query, 8000), operationId = text(input.operationId, 80);

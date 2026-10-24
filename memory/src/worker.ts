@@ -7,7 +7,7 @@ import { VideoUploads } from './uploads.js';
 
 function errorResponse(error: unknown) {
   const known = error instanceof MemoryError;
-  const internal = error instanceof Error && /^(memory_|video_|knowledge_|NODE_|REMOTE_)/.test(error.message) ? error.message : 'memory_operation_unknown';
+  const internal = error instanceof Error && /^(memory_|video_|audio_|knowledge_|NODE_|REMOTE_)/.test(error.message) ? error.message : 'memory_operation_unknown';
   return Response.json({ error: known ? error.code : internal }, { status: known ? error.status : 502, headers: { 'Cache-Control': 'no-store' } });
 }
 /** Only trusted service bindings reach these named entrypoints. No public route. */
@@ -15,7 +15,7 @@ export class MemoryAPI extends WorkerEntrypoint<Cloudflare.Env> {
   async fetch(request: Request): Promise<Response> {
     try {
       if (request.method !== 'POST') return new Response(null, { status: 405 });
-      if (new URL(request.url).pathname === '/video/part') {
+      if (['/video/part', '/audio/part'].includes(new URL(request.url).pathname)) {
         const owner = principal(JSON.parse(text(request.headers.get('memory-principal'), 1000)));
         return this.env.MEMORY.getByName(JSON.stringify(owner)).fetch(request);
       }
@@ -68,16 +68,17 @@ export class MemoryObject extends DurableObject<Cloudflare.Env> {
         return new Uint8Array(await part.arrayBuffer());
       } };
     });
-    return { service, video, db, uploads: new VideoUploads(db, this.env.ORIGINALS, owner) };
+    return { service, video, db, uploads: new VideoUploads(db, this.env.ORIGINALS, owner), audioUploads: new VideoUploads(db, this.env.ORIGINALS, owner, 'audio') };
   }
   async fetch(request: Request): Promise<Response> {
     try { await this.maintenance; } catch (error) { return errorResponse(error); }
     this.activeRequests++;
     try {
       const path = new URL(request.url).pathname;
-      const body: Record<string, unknown> = path === '/video/part' ? { principal: JSON.parse(text(request.headers.get('memory-principal'), 1000)) } : await boundedBody(request);
-      const { service, video, db, uploads } = this.components(principal(body.principal));
+      const body: Record<string, unknown> = ['/video/part', '/audio/part'].includes(path) ? { principal: JSON.parse(text(request.headers.get('memory-principal'), 1000)) } : await boundedBody(request);
+      const { service, video, db, uploads: videoUploads, audioUploads } = this.components(principal(body.principal));
       await service.revision();
+      const uploads = path.startsWith('/audio/') ? audioUploads : videoUploads;
       let result: unknown;
       switch (path) {
         case '/ingest': result = await service.ingest(body); break;
@@ -111,20 +112,20 @@ export class MemoryObject extends DurableObject<Cloudflare.Env> {
         case '/operation': result = await service.operation(text(body.operationId, 160)); break;
         case '/recover': result = await service.recover(body); break;
         case '/revision': result = { revision: await service.revision() }; break;
-        case '/video/upload': result = await uploads.start(body); break;
-        case '/video/part': result = await uploads.part(request.headers.get('memory-upload'), Number(request.headers.get('memory-part')), request); break;
-        case '/video/abort-upload': result = await uploads.abort(body.uploadId); break;
-        case '/video/complete-upload': {
+        case '/audio/upload': case '/video/upload': result = await uploads.start(body); break;
+        case '/audio/part': case '/video/part': result = await uploads.part(request.headers.get('memory-upload'), Number(request.headers.get('memory-part')), request); break;
+        case '/audio/abort-upload': case '/video/abort-upload': result = await uploads.abort(body.uploadId); break;
+        case '/audio/complete-upload': case '/video/complete-upload': {
           const uploaded = await uploads.complete(body);
           result = await video.create({ operationId: text(body.operationId, 80), messageRef: text(body.messageRef, 160), sessionRef: text(body.sessionRef, 160),
-            key: uploaded.key, mimeType: uploaded.mimeType, strategy: body.strategy === undefined ? 'dynamic' : body.strategy as 'fixed' | 'dynamic',
-            seconds: Number(body.seconds ?? 10), minDurationMs: Number(body.minDurationMs ?? 2000) }); break;
+            key: uploaded.key, mimeType: uploaded.mimeType, strategy: body.strategy === undefined ? (path.startsWith('/audio/') ? 'fixed' : 'dynamic') : body.strategy as 'fixed' | 'dynamic',
+            seconds: Number(body.seconds ?? (path.startsWith('/audio/') ? 20 : 10)), minDurationMs: Number(body.minDurationMs ?? 2000) }); break;
         }
-        case '/video/status': result = await video.status(text(body.operationId, 80)); break;
-        case '/video/events': result = await video.events(text(body.operationId, 80), body.cursor === undefined ? undefined : text(body.cursor, 1024), Number(body.limit ?? 32)); break;
-        case '/video/step': result = await video.step(text(body.operationId, 80)); break;
-        case '/video/reason': result = await video.createReason({ ref: sourceRef(body.ref), query: text(body.query), operationId: text(body.operationId, 80) }); break;
-        case '/video/recover': result = await video.recover({ previousOperationId: text(body.previousOperationId, 80), operationId: text(body.operationId, 80), acceptUnknown: body.acceptUnknown === true }); break;
+        case '/audio/status': case '/video/status': result = await video.status(text(body.operationId, 80)); break;
+        case '/audio/events': case '/video/events': result = await video.events(text(body.operationId, 80), body.cursor === undefined ? undefined : text(body.cursor, 1024), Number(body.limit ?? 32)); break;
+        case '/audio/step': case '/video/step': result = await video.step(text(body.operationId, 80)); break;
+        case '/audio/reason': case '/video/reason': result = await video.createReason({ ref: sourceRef(body.ref), query: text(body.query), operationId: text(body.operationId, 80) }); break;
+        case '/audio/recover': case '/video/recover': result = await video.recover({ previousOperationId: text(body.previousOperationId, 80), operationId: text(body.operationId, 80), acceptUnknown: body.acceptUnknown === true }); break;
         default: throw new MemoryError('route_not_found', 404);
       }
       // R2 page cleanup is resumable and continues even when no video jobs remain.

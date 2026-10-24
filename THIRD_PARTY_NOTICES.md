@@ -36,7 +36,7 @@ The Python lockfile includes annotated-types, anyio, distro, httpx, idna, jieba,
 
 ## Synthetic fixtures
 
-The media in `memory/test/fixtures/` are project test fixtures described by [their provenance note](memory/test/fixtures/README.md) as generated frames and tones, without user recordings or production data. FFmpeg was used as a development tool and is not bundled. No FFmpeg program code is included by distributing its generated test media. Codec patent permissions are not granted by this project's copyright license.
+The media in `memory/test/fixtures/` and `test/live-fixtures/` are synthetic project fixtures: generated frames/tones, meeting notices and scripted meeting speech. Their [media provenance](memory/test/fixtures/README.md) and [live-case provenance](test/live-fixtures/README.md) identify the content; they contain no user recordings or production data. FFmpeg was used as a development tool and is not bundled. No FFmpeg program code is included by distributing its generated test media. Codec patent permissions are not granted by this project's copyright license.
 
 ## Building versus redistributing an executable
 

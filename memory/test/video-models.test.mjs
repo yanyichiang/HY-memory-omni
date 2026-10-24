@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { sliceVideo, inspectLongVideo } from '../dist/video.js';
 import { segmentVideo, reasonVideoClip, compactVideoReason } from '../dist/video-models.js';
 const bytes = new Uint8Array(readFileSync(new URL('fixtures/blue-tone.mp4', import.meta.url)));
 const ref = { sourceId: 'meeting', revision: 1, mediaRef: 'original' };
@@ -32,6 +33,8 @@ test('reasoning binds source revision, maps local clock, retains prior identitie
     return JSON.stringify(response([event('p')]));
   });
   assert.equal(first.events[0].startMs, 5100);
+  assert.equal(first.events[0].timeBasis, 'model-estimate');
+  assert.deepEqual(first.events[0].sourceWindow, { startMs: 5000, endMs: 6026 });
   assert.deepEqual(first.events[0].ref, ref);
   const priorId = first.events[0].id;
   const secondInput = { ...input(first), logical: { startMs: 7000, endMs: 8026 }, offsetMs: 7000 };
@@ -118,4 +121,45 @@ test('native wire separates current-file clip times from historical original tim
     {...event(),clipStartMs:100,clipEndMs:2000},
     {...event(),startMs:100,endMs:200},
   ])await assert.rejects(reasonVideoClip(input(prior),'stub',async()=>JSON.stringify(response([newEvent]))),/video_model_response_invalid/);
+});
+
+
+test('audio native segmentation and reasoning preserve the same evidence protocol with audio-only prompts',async()=>{
+  const audio={...base,mimeType:'audio/wav',bytes:new Uint8Array(readFileSync(new URL('fixtures/tone.wav',import.meta.url))),timeline:{durationMs:1000,hasAudio:true,hasVideo:false}};
+  const ranges=await segmentVideo({...audio,minDurationMs:100},'stub',async parts=>{
+    assert.equal(parts[0].inlineData.mimeType,'audio/wav');assert.match(parts[1].text,/AUDIO ONLY/);
+    return JSON.stringify({ranges:[{startMs:0,endMs:1000}]});
+  });
+  assert.equal(ranges.length,1);
+  const state=await reasonVideoClip({...input(),...audio,logical:{startMs:5000,endMs:6000}},'stub',async parts=>{
+    assert.match(parts[1].text,/AUDIO ONLY/);return JSON.stringify(response([event('audio','objection')]));
+  });
+  assert.equal(state.events[0].startMs,5100);assert.equal(state.events[0].speechAct,'objection');
+});
+
+
+test('real 14-second meeting tail separates rounded source coverage from the strict native evidence clock',async()=>{
+  const bytes=new Uint8Array(readFileSync(new URL('fixtures/synthetic-meeting-m42.mp4',import.meta.url)));
+  const media={size:bytes.length,read:async(offset,length)=>bytes.slice(offset,offset+length)};
+  const timeline=await inspectLongVideo('video/mp4',media);
+  assert.equal(timeline.durationMs,28171);
+  const clip=await sliceVideo('video/mp4',media,{startMs:28000,endMs:timeline.durationMs});
+  assert.equal(clip.offsetMs,27170.8984375);assert.equal(clip.timeline.durationMs,1000);
+  assert.equal(clip.logical.endMs-(clip.offsetMs+clip.timeline.durationMs),0.1015625);
+  const request={...input(),bytes:clip.bytes,timeline:clip.timeline,logical:clip.logical,offsetMs:clip.offsetMs};
+  const observed={...event('tail'),clipStartMs:950,clipEndMs:1000};
+  const state=await reasonVideoClip(request,'stub',async parts=>{
+    assert.match(parts[1].text,/in \[829\.1015625, 1000\] ms/);
+    return JSON.stringify(response([observed]));
+  });
+  assert.equal(state.events[0].endMs,clip.offsetMs+1000);
+  assert.equal(state.events[0].timeBasis,'model-estimate');
+  assert.deepEqual(state.events[0].sourceWindow,{startMs:clip.offsetMs,endMs:clip.offsetMs+clip.timeline.durationMs});
+  assert.ok(state.events[0].endMs<clip.logical.endMs,'integer coverage padding is never invented evidence');
+  await assert.rejects(reasonVideoClip(request,'stub',async()=>JSON.stringify(response([{...observed,clipEndMs:1000.05}]))),/video_model_response_invalid/);
+  let calls=0;
+  for(const logical of [{startMs:28000,endMs:28172},{startMs:28170.95,endMs:28171}]){
+    await assert.rejects(reasonVideoClip({...request,logical},'stub',async()=>{calls++;return '{}';}),/video_reason_input_invalid/);
+  }
+  assert.equal(calls,0,'a gap of at least one millisecond or an empty evidence intersection fails before model use');
 });

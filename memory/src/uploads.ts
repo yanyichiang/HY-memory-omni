@@ -4,10 +4,10 @@ import type { Store } from './storage.js';
 interface Upload { id: string; key: string; uploadId: string; mimeType: string; state: 'open' | 'completing' | 'complete' | 'aborted'; operationId?: string }
 /** Streams parts into an immutable, owner-scoped original. No whole video JSON/base64 body. */
 export class VideoUploads {
-  constructor(private readonly db: Store, private readonly bucket: R2Bucket, private readonly owner: Principal) {}
+  constructor(private readonly db: Store, private readonly bucket: R2Bucket, private readonly owner: Principal, private readonly kind: 'video' | 'audio' = 'video') {}
   async start(input: Record<string, unknown>) {
     const mimeType = text(input.mimeType, 80);
-    if (!['video/mp4', 'video/quicktime'].includes(mimeType)) throw new MemoryError('video_required', 415);
+    if (!(this.kind === 'audio' ? ['audio/wav', 'audio/mpeg'] : ['video/mp4', 'video/quicktime']).includes(mimeType)) throw new MemoryError(`${this.kind}_required`, 415);
     const id = crypto.randomUUID(), key = `${encodeURIComponent(this.owner.ownerRef)}/${this.owner.scopeRef}/uploads/${id}`;
     const multipart = await this.bucket.createMultipartUpload(key, { httpMetadata: { contentType: mimeType } });
     const upload: Upload = { id, key, uploadId: multipart.uploadId, mimeType, state: 'open' };
@@ -17,6 +17,7 @@ export class VideoUploads {
   private async get(id: unknown) {
     const upload = await this.db.get<Upload>(`upload:${text(id, 160)}`);
     if (!upload) throw new MemoryError('upload_not_found', 404);
+    if (!upload.mimeType.startsWith(`${this.kind}/`)) throw new MemoryError(`${this.kind}_required`, 415);
     return upload;
   }
   async part(id: unknown, partNumber: number, request: Request) {

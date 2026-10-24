@@ -1,0 +1,11 @@
+{
+  // Template only: scripts/cloud.mjs renders installation-specific names and trusted owner.
+  "name": "hy-memory-omni-gateway",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": false,
+  "preview_urls": false,
+  "services": [{ "binding": "MEMORY", "service": "hy-memory-omni-store", "entrypoint": "MemoryAPI" }],
+  "vars": { "HY_OWNER_REF": "unconfigured" },
+  "observability": { "enabled": false }
+}

@@ -81,3 +81,19 @@ test('dense accepted WAV exposes a format-sized window instead of rejecting an 8
     assert.ok(last.bytes.length<=4*1024*1024);assert.equal(last.endMs,1000);
   }finally{audio.dispose();}
 });
+
+
+test('digital silence is exact across PCM integer widths, u8 midpoint and f32 signed zero, never NaN',async()=>{
+  async function check(bits,tag,values,expected){
+    const width=bits/8,bytes=new Uint8Array(44+8*width),view=new DataView(bytes.buffer);
+    const ascii=(at,s)=>bytes.set(new TextEncoder().encode(s),at);
+    ascii(0,'RIFF');view.setUint32(4,bytes.length-8,true);ascii(8,'WAVEfmt ');view.setUint32(16,16,true);
+    view.setUint16(20,tag,true);view.setUint16(22,1,true);view.setUint32(24,8000,true);view.setUint32(28,8000*width,true);view.setUint16(32,width,true);view.setUint16(34,bits,true);ascii(36,'data');view.setUint32(40,8*width,true);
+    if(tag===3)values.forEach((value,i)=>view.setFloat32(44+i*4,value,true));else bytes.set(values,44);
+    const original=bytes.slice(),audio=await prepareAudio('audio/wav',bytes,timeline(1));
+    try{const window=await audio.window(0,1);assert.equal(window.digitalSilence,expected);assert.deepEqual(window.bytes.subarray(window.bytes.length-8*width),bytes.subarray(44));assert.deepEqual(bytes,original);}finally{audio.dispose();}
+  }
+  await check(8,1,Array(8).fill(128),true);await check(8,1,[127,...Array(7).fill(128)],false);await check(8,1,Array(8).fill(0),false);
+  for(const bits of [16,24,32]){await check(bits,1,Array(8*bits/8).fill(0),true);await check(bits,1,[1,...Array(8*bits/8-1).fill(0)],false);}
+  await check(32,3,[0,-0,0,-0,0,0,0,0],true);await check(32,3,[NaN,0,0,0,0,0,0,0],false);await check(32,3,[1e-40,0,0,0,0,0,0,0],false);
+});
