@@ -1,0 +1,13 @@
+--- a/libheif/plugins/decoder_libde265.cc
++++ b/libheif/plugins/decoder_libde265.cc
+@@ -200,8 +200,8 @@
+ 
+ #if defined(__EMSCRIPTEN__)
+   // Speed up decoding from JavaScript.
+-  de265_set_parameter_bool(decoder->ctx, DE265_DECODER_PARAM_DISABLE_DEBLOCKING, 1);
+-  de265_set_parameter_bool(decoder->ctx, DE265_DECODER_PARAM_DISABLE_SAO, 1);
++  // HY probe: retain normative reconstruction; do not disable DE265_DECODER_PARAM_DISABLE_DEBLOCKING.
++  // HY probe: retain normative reconstruction; do not disable DE265_DECODER_PARAM_DISABLE_SAO.
+ #else
+   int nThreads = (options->num_threads ? options->num_threads : 1);
+ 

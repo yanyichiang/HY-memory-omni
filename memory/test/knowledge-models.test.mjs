@@ -194,3 +194,52 @@ test('L2 paraphrases support node binding but cannot replace the independent ori
     assert.equal(calls,1,'invalid quotes never trigger retry, repair, claim deletion or quote replacement');
   }
 });
+
+
+test('same cannot discard one-sided conditions or validity from the actual M-17 schedule/change candidate', async () => {
+  // First response id12, live-images-recovered: preserve the returned reason.
+  const originalReason = "Both assert M-17's current scheduled start as Saturday 2026-10-31 at 15:00. The reschedule notice's 'Now' value matches the initial notice's date/time; the reschedule notice additionally records the prior value and effective time, but the asserted current schedule proposition is equivalent.";
+  const scheduled = claim('e6dc7363-f3d4-4d5a-ae74-ca0fc1b45875', {
+    subject: 'PROJECT REVIEW MEETING (meeting ID M-17)', event: 'PROJECT REVIEW MEETING, meeting ID M-17',
+    text: 'A displayed notice for PROJECT REVIEW MEETING, meeting ID M-17, states the date as Saturday 2026-10-31 and the time as 15:00.',
+    predicate: 'scheduled start date and time', value: 'Saturday 2026-10-31 at 15:00', conditions: '', validTime: '',
+    quote: '"PROJECT REVIEW MEETING"\n    "MEETING ID: M-17"\n    "DATE: SATURDAY 2026-10-31"\n    "TIME: 15:00"',
+  });
+  const change = claim('77b10620-b472-41b7-a77e-398824828a40', {
+    subject: 'MEETING M-17', event: 'MEETING M-17',
+    text: 'A displayed reschedule notice for MEETING M-17 states the meeting was previously scheduled for Friday 2026-10-30 15:00 and is now scheduled for Saturday 2026-10-31 15:00, effective 2026-10-23 00:00 UTC.',
+    predicate: 'scheduled start date and time (rescheduled)',
+    value: 'now Saturday 2026-10-31 15:00, previously Friday 2026-10-30 15:00, effective 2026-10-23 00:00 UTC',
+    conditions: '', validTime: '2026-10-23 00:00 UTC',
+    quote: '"RESCHEDULE NOTICE"\n    "Previously: Friday 2026-10-30 15:00"\n    "Now: Saturday 2026-10-31 15:00"\n    "Effective: 2026-10-23 00:00 UTC"',
+  });
+  for (const field of ['validTime', 'conditions']) {
+    for (const reverse of [false, true]) {
+      const left = { ...scheduled, validTime: '', conditions: '' };
+      const right = { ...change, validTime: '', conditions: '', [field]: field === 'conditions' ? 'If approved' : change.validTime };
+      const supplied = reverse ? { left: right, right: left } : { left, right };
+      const candidate = { left: supplied.left.id, right: supplied.right.id, kind: 'same', reason: originalReason };
+      const before = structuredClone(supplied);
+      let calls = 0;
+      const models = new CloudflareKnowledgeModels('fixed', async (_system, body) => {
+        calls++; assert.deepEqual(body.pairs, [supplied]);
+        return JSON.stringify({ relations: [candidate] });
+      });
+      const [result] = await models.relate([supplied]);
+      assert.equal(result.kind, 'uncertain');
+      assert.ok(result.reason.startsWith(originalReason));
+      assert.match(result.reason, new RegExp(`Qualification coverage is incomplete for ${field}`));
+      assert.match(result.reason, /Relationship equivalence is unproven; entity identity remains as supplied/);
+      assert.equal(result.leftQuote, supplied.left.quote);
+      assert.equal(result.rightQuote, supplied.right.quote);
+      assert.deepEqual(supplied, before);
+      assert.equal(calls, 1, 'the guard never retries or calls a second judge');
+    }
+  }
+  // Nonempty unequal strings are not a server-side semantic conflict/difference judgment.
+  const supplied = { left: { ...scheduled, validTime: 'Friday', conditions: 'If approved' },
+    right: { ...change, validTime: 'Saturday', conditions: 'When authorized' } };
+  const candidate = { left: supplied.left.id, right: supplied.right.id, kind: 'same', reason: originalReason };
+  const models = new CloudflareKnowledgeModels('fixed', async () => JSON.stringify({ relations: [candidate] }));
+  assert.deepEqual(await models.relate([supplied]), [boundRelation(candidate, supplied)]);
+});

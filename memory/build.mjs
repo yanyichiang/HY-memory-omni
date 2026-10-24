@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 await prepareMp3();
 await prepareAudioCodecs();
 const matroskaEntry = await prepareMatroska();
-await build({ absWorkingDir: root, entryPoints: ['src/worker.ts', 'src/service.ts', 'src/models.ts', 'src/media.ts', 'src/audio.ts', 'src/extended-audio.ts', 'src/aac-audio.ts', 'src/native-audio.ts', 'src/audio-models.ts', 'src/knowledge.ts', 'src/knowledge-models.ts', 'src/storage.ts', 'src/staged-store.ts', 'src/paged-store.ts', 'src/vector-index.ts', 'src/node-store.ts', 'src/knowledge-store.ts', 'src/video.ts', 'src/video-models.ts', 'src/long-video.ts', 'src/long-audio.ts', 'src/uploads.ts'],
+await build({ absWorkingDir: root, entryPoints: ['src/worker.ts', 'src/service.ts', 'src/models.ts', 'src/media.ts', 'src/audio.ts', 'src/extended-audio.ts', 'src/aac-audio.ts', 'src/native-audio.ts', 'src/native-image.ts', 'src/audio-models.ts', 'src/knowledge.ts', 'src/knowledge-models.ts', 'src/storage.ts', 'src/staged-store.ts', 'src/paged-store.ts', 'src/vector-index.ts', 'src/node-store.ts', 'src/knowledge-store.ts', 'src/video.ts', 'src/video-models.ts', 'src/long-video.ts', 'src/long-audio.ts', 'src/uploads.ts'],
   outdir: 'dist', bundle: true, splitting: true, format: 'esm', platform: 'browser', target: 'es2022',
   external: ['cloudflare:workers'], sourcemap: true, alias: { mediabunny: matroskaEntry },
   plugins: [{ name: 'static-audio-wasm', setup(build) {
@@ -26,3 +26,8 @@ await cp(new URL('licenses/', import.meta.url), new URL('dist/licenses/', import
 // Keep binary redistribution provenance alongside the runtime bundle.
 await cp(new URL('codecs/aac/', import.meta.url), new URL('dist/licenses/aac/', import.meta.url), { recursive: true });
 await cp(new URL('.generated/mediabunny/', import.meta.url), new URL('dist/licenses/mediabunny/', import.meta.url), { recursive: true });
+
+for (const [codec, wasm] of [['heif','image-decoder'],['animation','animation']]) {
+  await copyFile(new URL(`codecs/${codec}/${wasm}.wasm`, import.meta.url), new URL(`dist/${wasm}.wasm`, import.meta.url));
+}
+for (const codec of ['heif','gif','animation']) await cp(new URL(`codecs/${codec}/`, import.meta.url), new URL(`dist/licenses/${codec}/`, import.meta.url), { recursive: true });

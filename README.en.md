@@ -34,7 +34,7 @@ Original media and structured propositions coexist: retrieve memories, inspect t
 | Capability | What it supports |
 | --- | --- |
 | 📝 **Text memory** | Ingest statements, retrieve related memories, and retain source and revision history |
-| 🖼️ **Image memory** | Preserve original images, extract observations, and verify retrieval hits against the originals |
+| 🖼️ **Image memory** | PNG/JPEG/WebP plus bounded HEIC/AVIF/GIF; preserve originals and animation timing, and verify retrieval against media evidence |
 | 🎧 **Audio memory** | Preserve original audio and time positions; retrieve speech and non-speech evidence |
 | 🎬 **Video memory** | Process visuals and audio together and return time ranges traceable to the original video |
 | 🔎 **Cross-modal retrieval** | Query with text or native media and connect evidence across modalities |

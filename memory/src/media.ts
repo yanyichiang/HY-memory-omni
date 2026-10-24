@@ -3,9 +3,11 @@ import { MemoryError, type Timeline } from './service.js';
 import { inspectInlineAudio, isExtendedAudio } from './native-audio.js';
 import { isMatroska, inspectMatroskaVideo, sliceMatroskaVideo } from './matroska-video.js';
 import { videoSoundtrack } from './video-soundtrack.js';
+import { isExtendedImage, nativeImage } from './native-image.js';
 
 /** Inspect container/packets and, for extended audio, decoded sample clocks. No network or key lookup. */
 export async function inspectMedia(mimeType: string, bytes: Uint8Array): Promise<Timeline | undefined> {
+  if (isExtendedImage(mimeType)) return (await nativeImage(mimeType,bytes)).timeline;
   if (mimeType.startsWith('image/')) return undefined;
   if (isExtendedAudio(mimeType)) return inspectInlineAudio(mimeType, bytes);
   if (isMatroska(mimeType)) {

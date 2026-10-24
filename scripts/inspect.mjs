@@ -27,8 +27,9 @@ export async function inspectFile(path) {
       const result = await file.read(bytes, 0, length, offset);
       return new Uint8Array(bytes.subarray(0, result.bytesRead));
     };
-    const head = Buffer.from(await read(0, Math.min(size, 64)));
-    let mimeType = head.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) ? 'matroska'
+    const head = Buffer.from(await read(0, Math.min(size, 4096)));
+    const { extendedImageMime } = await import('../memory/dist/native-image.js');
+    let mimeType = extendedImageMime(head) ?? (head.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) ? 'matroska'
       : head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE' ? 'audio/wav'
       : head.toString('ascii', 0, 4) === 'OggS' ? 'audio/ogg'
       : head.toString('ascii', 0, 4) === 'fLaC' ? 'audio/flac'
@@ -37,7 +38,7 @@ export async function inspectFile(path) {
       : head.toString('ascii', 4, 8) === 'ftyp' ? head.toString('ascii', 8, 12) === 'qt  ' ? 'video/quicktime' : 'video/mp4'
       : head.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? 'image/png'
       : head[0] === 255 && head[1] === 216 ? 'image/jpeg'
-      : head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WEBP' ? 'image/webp' : undefined;
+      : head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WEBP' ? 'image/webp' : undefined);
     if (!mimeType) return { supported: false, bytes: size, error: 'unrecognized_container', hint: 'See docs/MEDIA.md for supported containers and codecs. The filename extension is not used to infer support.' };
     try {
       if (mimeType === 'matroska') {
@@ -59,7 +60,7 @@ export async function inspectFile(path) {
       } else {
         if (size > 8 * 1024 * 1024) return { supported: false, mimeType, bytes: size, error: 'image_too_large', hint: 'Export an image below 8 MiB. Multipart ingestion is for recordings.' };
         const { inspectMedia } = await import('../memory/dist/media.js');
-        await inspectMedia(mimeType, await read(0, size));
+        timeline = await inspectMedia(mimeType, await read(0, size));
       }
       let multipart = size > 8 * 1024 * 1024 || !!timeline && timeline.durationMs > (timeline.hasVideo ? 120000 : 180000);
       if (!multipart && (mimeType.startsWith('video/') || ['audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac'].includes(mimeType))) {
