@@ -95,7 +95,7 @@ npm run init
 npm start
 ```
 
-默认入口：**http://127.0.0.1:8787**。
+默认入口：`http://127.0.0.1:8787`。
 
 首次启动会安装锁定的 Python Workers 依赖并构建 TypeScript Worker；后续启动复用 Python 依赖并重新构建 TS bundle。服务运行期间保持启动进程开启，按 **Ctrl+C** 停止。
 

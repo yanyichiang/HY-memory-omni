@@ -95,7 +95,7 @@ The native multimodal embedding model, `gemini-embedding-2`, uses Gateway's nati
 npm start
 ```
 
-Default endpoint: **http://127.0.0.1:8787**.
+Default endpoint: `http://127.0.0.1:8787`.
 
 The first start installs the pinned Python Workers dependencies and builds the TypeScript Worker. Subsequent starts reuse the Python dependencies and rebuild the TS bundle. Keep the startup process running while using the service; press **Ctrl+C** to stop it.
 
