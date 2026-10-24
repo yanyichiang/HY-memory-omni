@@ -20,7 +20,7 @@ export interface Grounding extends TimeRange {
 export interface TemporalMatch { intervals: Grounding[]; correctionRelevant: boolean }
 export interface ImageMatch { matches: boolean; text: string; correctionRelevant: boolean; model: string; configKey: string }
 export interface NodeRow { payload: Record<string, unknown>; embedding: number[]; lexicalTokens?: string[] }
-export interface Vector { model: string; values: number[] }
+export interface Vector { model: string; values: number[]; modalities?: ('text' | 'image' | 'audio' | 'video')[] }
 export interface Source {
   ref: SourceRef; messageRef: string; sessionRef: string; mimeType: string; key: string;
   state: 'pending' | 'active' | 'deleted' | 'revoked'; perception?: Perception;
@@ -73,7 +73,7 @@ export function sourceRef(value: unknown): SourceRef {
 }
 function mediaType(value: unknown): string {
   const type = text(value, 80);
-  if (!['image/png', 'image/jpeg', 'image/webp', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac', 'video/mp4', 'video/quicktime'].includes(type)) throw new MemoryError('unsupported_media', 415);
+  if (!['image/png', 'image/jpeg', 'image/webp', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac', 'video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'].includes(type)) throw new MemoryError('unsupported_media', 415);
   return type;
 }
 export function timeRange(value: unknown, timeline: Timeline): TimeRange {
@@ -393,6 +393,7 @@ export class MemoryService {
     const results = [];
     let examinedCandidates = 0;
     const limitations = ['Semantic candidate retrieval is not exhaustive; no returned match does not prove absence.', 'Text keyword scores use a bounded posting candidate corpus; persisted vector search uses a bounded tree traversal.'];
+    if (queryMedia && !queryMedia.mimeType.startsWith('image/')) limitations.push('Audio/video query cues are observed separately before source grounding; that model interpretation may omit query details and is not source evidence.');
     if (output.retrievalCoverage !== undefined && record(output.retrievalCoverage).exhaustive !== true) limitations.push('Hy Reader callbacks report incomplete candidate coverage.');
     for (const { score: _score, ...item } of ranked) {
       if (results.length >= Number(limit) || examinedCandidates >= 20) break;
@@ -428,7 +429,9 @@ export class MemoryService {
             if (typeof match.correctionRelevant !== 'boolean' || match.correctionRelevant && source.correction === undefined) throw new MemoryError('grounding_correction_invalid', 502);
             grounded.set(key, { intervals: checkedGroundings(match.intervals, source.timeline!), correctionRelevant: match.correctionRelevant });
             limitations.push(source.timeline!.hasVideo
-              ? 'Video candidate vectors omit soundtrack and sample frames; returned video times are model estimates.'
+              ? source.timeline!.hasAudio && !source.vector?.modalities?.includes('audio')
+                ? 'This older video vector omits its soundtrack; reinspection rebuilds its native index. Video frames are sampled and returned times are model estimates.'
+                : 'Video candidate vectors sample frames; returned video times are model estimates.'
               : 'Audio matches identify sampled excerpt bounds, not exact event boundaries; events crossing windows may be missed.');
           }
           await this.source(ref);

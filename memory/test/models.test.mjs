@@ -23,19 +23,23 @@ test('image matching sends original and cue images with all text constraints to 
   assert.equal(sent.reasoning_effort, 'none');
 });
 test('image matching keeps audio query native on the configured AV route and rejects invented correction authority', async () => {
-  let sent, attempts = 0;
+  let sent, cue, attempts = 0;
   const models = new CloudflareMemoryModels(settings, engine, async (url, init) => {
     attempts++; assert.ok(url.endsWith('/ai/run')); sent = JSON.parse(init.body);
+    if (!sent.input.generationConfig.responseSchema) { cue=sent; return temporal('An audible tone.'); }
     return temporal(JSON.stringify({ matches: false, text: 'No audio evidence exists in a still image.', correctionRelevant: true }));
   });
   await assert.rejects(models.matchImage({ mimeType: 'image/png', bytes: Uint8Array.of(1), query: 'Find the sound source', media: { mimeType: 'audio/wav', bytes: Uint8Array.of(2) } }), /image_match_response_invalid/);
-  assert.equal(attempts, 1);
+  assert.equal(attempts, 2);
   assert.equal(sent.model, 'google/gemini-2.5-flash');
-  assert.equal(sent.input.contents[0].parts[3].inlineData.mimeType, 'audio/wav');
+  assert.equal(cue.input.contents[0].parts[1].inlineData.mimeType, 'audio/wav');
+  assert.deepEqual(sent.input.contents[0].parts.filter(p=>p.inlineData).map(p=>p.inlineData.mimeType),['image/png']);
+  assert.match(sent.input.contents[0].parts[2].text,/An audible tone/);
 });
 test('native temporal perception sends original video with soundtrack and actual audio query media', async () => {
   const requests = [];
   const audio = new Uint8Array(await readFile(new URL('fixtures/tone.wav', import.meta.url)));
+  const video = new Uint8Array(await readFile(new URL('fixtures/blue.mp4', import.meta.url)));
   const models = new CloudflareMemoryModels(settings, engine, async (url, init) => {
     const body = JSON.parse(init.body); requests.push({ url, headers: init.headers, body });
     if (url.includes(':embedContent')) return Response.json({ embedding: { values: Array(1536).fill(0.1) } });
@@ -48,12 +52,13 @@ test('native temporal perception sends original video with soundtrack and actual
   const perception = await models.perceive('video/mp4', Uint8Array.of(3, 4), timeline);
   const hits = await models.locate({ mimeType: 'video/mp4', bytes: Uint8Array.of(3, 4), timeline,
     query: 'the beep', media: { mimeType: 'audio/wav', bytes: audio } });
-  await models.embed({ mimeType: 'video/mp4', bytes: Uint8Array.of(3, 4) });
+  const vector = await models.embed({ mimeType: 'video/mp4', bytes: video });
   assert.equal(perception.kind, 'video'); assert.equal(perception.model, 'google-ai-studio/gemini-2.5-flash');
   assert.match(requests[0].body.messages[1].content[1].image_url.url, /^data:image\/png;base64,/);
   assert.deepEqual(requests[1].body.input.contents[0].parts[0], { inlineData: { mimeType: 'video/mp4', data: 'AwQ=' } });
-  assert.deepEqual(requests[2].body.input.contents[0].parts.slice(0, 2), [requests[1].body.input.contents[0].parts[0],
-    { inlineData: { mimeType: 'audio/wav', data: Buffer.from(audio).toString('base64') } }]);
+  assert.deepEqual(requests[2].body.input.contents[0].parts.filter(p=>p.inlineData), [{ inlineData: { mimeType: 'audio/wav', data: Buffer.from(audio).toString('base64') } }]);
+  assert.deepEqual(requests[3].body.input.contents[0].parts.filter(p=>p.inlineData),[requests[1].body.input.contents[0].parts[0]]);
+  assert.match(requests[3].body.input.contents[0].parts[1].text,/Synthetic native observation/);
   assert.equal(requests[1].url, 'https://api.cloudflare.com/client/v4/accounts/account/ai/run');
   assert.equal(requests[1].body.model, 'google/gemini-2.5-flash');
   assert.equal(requests[1].headers.Authorization, 'Bearer fixture-token');
@@ -63,9 +68,10 @@ test('native temporal perception sends original video with soundtrack and actual
   assert.equal(requests[1].headers['cf-aig-skip-cache'], 'true');
   assert.equal(requests[1].body.input.systemInstruction,undefined);
   assert.equal(requests[2].body.input.systemInstruction,undefined);
-  assert.equal(requests[3].headers['cf-aig-authorization'], 'Bearer fixture-token');
+  assert.equal(requests[4].headers['cf-aig-authorization'], 'Bearer fixture-token');
   assert.equal(hits.intervals[0].basis, 'model-estimate'); assert.deepEqual(hits.intervals[0].modalities, ['audio', 'video']);
-  assert.deepEqual(requests[3].body.content.parts, [{ inline_data: { mime_type: 'video/mp4', data: 'AwQ=' } }]);
+  assert.deepEqual(requests[4].body.content.parts, [{ inline_data: { mime_type: 'video/mp4', data: Buffer.from(video).toString('base64') } }]);
+  assert.deepEqual(vector.modalities, ['video']);
 });
 
 test('standalone audio perception uses parsed WAV windows and the windows response contract', async () => {

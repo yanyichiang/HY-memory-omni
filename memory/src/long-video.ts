@@ -160,7 +160,7 @@ export class LongVideo {
     }
     await this.executing(job);
     const childId = crypto.randomUUID(), ref = { sourceId: childId, revision: 1, mediaRef: crypto.randomUUID() };
-    const child: Source = { ref, key: `${source.key}.clips/${source.ref.revision}/${childId}.${clip.mimeType === 'audio/wav' ? 'wav' : 'mp4'}`, mimeType: clip.mimeType, messageRef: source.messageRef, sessionRef: source.sessionRef,
+    const child: Source = { ref, key: `${source.key}.clips/${source.ref.revision}/${childId}.${clip.mimeType === 'audio/wav' ? 'wav' : clip.mimeType === 'video/quicktime' ? 'mov' : 'mp4'}`, mimeType: clip.mimeType, messageRef: source.messageRef, sessionRef: source.sessionRef,
       timeline: clip.timeline, state: 'pending', derivedFrom: [source.ref], clip: { original: source.ref, logical, actual: clip.actual, offsetMs: clip.offsetMs },
       ...(source.correction ? { correction: source.correction } : {}), ...(source.reinspectionQuestion ? { reinspectionQuestion: source.reinspectionQuestion } : {}) };
     const clipOp = `${job.operationId}:clip:${logical.startMs}`;

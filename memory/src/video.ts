@@ -1,5 +1,8 @@
 import { BufferSource, BufferTarget, Conversion, CustomSource, EncodedAudioPacketSource, EncodedVideoPacketSource, EncodedPacketSink, Input, MP4, Mp4OutputFormat, Output, QTFF } from 'mediabunny';
 import { MemoryError, type Timeline, type TimeRange } from './service.js';
+import { isMatroska, inspectMatroskaVideo, sliceMatroskaVideo } from './matroska-video.js';
+import { videoSoundtrack } from './video-soundtrack.js';
+export { checkMatroska } from './matroska-container.js';
 
 /** The caller binds every read to the same authorized, immutable object revision. */
 export interface RangeMedia { size: number; read(offset: number, length: number): Promise<Uint8Array> }
@@ -94,6 +97,7 @@ export function validateDynamicRanges(values: TimeRange[], durationMs: number): 
   return result;
 }
 export async function inspectLongVideo(mimeType: string, source: RangeMedia): Promise<Timeline> {
+  if (isMatroska(mimeType)) return inspectMatroskaVideo(mimeType, source);
   const input = open(mimeType, source);
   try { return await inspect(input); }
   catch (error) { if (error instanceof MemoryError) throw error; return fail('media_container_invalid'); }
@@ -106,6 +110,7 @@ export async function sliceVideo(mimeType: string, source: RangeMedia, requested
   bytes: Uint8Array; mimeType: string; logical: TimeRange; actual: TimeRange; offsetMs: number; tracks: VideoTrackRange[]; timeline: Timeline; sourceTimeline: Timeline;
 }> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) return fail('media_slice_limit_invalid', 400);
+  if (isMatroska(mimeType)) return sliceMatroskaVideo(mimeType, source, requested, maxBytes);
   const input = open(mimeType, source);
   let check: Input | undefined;
   try {
@@ -229,6 +234,10 @@ export async function sliceVideo(mimeType: string, source: RangeMedia, requested
       }
     } finally { verify.dispose(); }
     const outputTimeline = { durationMs: Math.ceil(Math.max(...tracks.map(t => t.output.endMs))), hasVideo: true, hasAudio: timeline.hasAudio };
+    if (timeline.hasAudio) {
+      try { await videoSoundtrack('video/mp4', bytes); }
+      catch (error) { if (error instanceof MemoryError && error.code === 'soundtrack_size_limit') return fail('media_slice_too_large', 413); throw error; }
+    }
     return { bytes, mimeType: 'video/mp4', logical, actual, offsetMs, tracks, timeline: outputTimeline, sourceTimeline: timeline };
   } catch (error) { if (error instanceof MemoryError) throw error; return fail('media_container_invalid'); }
   finally { check?.dispose(); input.dispose(); }

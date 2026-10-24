@@ -23,9 +23,12 @@ Use the same path for supported audio/video MIME types. Small-media ingestion ac
 | Audio | `audio/wav`: PCM u8, s16, s24, s32 or f32; `audio/mpeg`: MP3 | At most 180 seconds; exactly one audio track |
 | Compressed audio | `audio/mp4`: M4A AAC-LC/HE-AAC/HE-AACv2; `audio/aac`: raw ADTS with those profiles; `audio/ogg`: Ogg Opus; `audio/flac`: native FLAC | At most 180 seconds inline; AAC/Opus mono or stereo; FLAC up to eight channels; derived float32 WAV at most 8 MiB |
 | Short video | `video/mp4` or `video/quicktime`; video AVC, HEVC, AV1 or VP9; optional audio AAC or MP3 | At most 120 seconds; exactly one video track and at most one audio track |
+| WebM / Matroska video | `video/webm` or `video/x-matroska`; AVC, HEVC, VP9 or AV1; optional Opus, AAC or MP3 | Exactly one video and at most one audio track; at most 120 seconds inline; original and derived MOV each at most 8 MiB; see structural/timeline limits in [MEDIA.md](MEDIA.md) |
 | Long video | Same supported video containers/codecs, using multipart jobs below | No application-level total duration cap; each processed clip must still fit the media limits |
 
 Encrypted media, extra tracks, live streams and unsupported nonzero track origins are rejected. M4A supports only the single priming/edit mapping documented in [media compatibility](MEDIA.md); ADTS retains its encoded priming/end-padding samples. An extension alone does not establish codec support; a container accepted locally must also be supported by the configured models. Typical validation errors are `media_codec_unsupported`, `media_tracks_invalid`, `media_timeline_origin`, `media_duration_exceeded` and `media_too_large`. Long audio uses the matching `/audio/*` multipart API. Run `npm run inspect -- FILE` before uploading an unfamiliar export; see [media compatibility](MEDIA.md).
+
+WebM/MKV uses the same `/ingest`, `/search`, `/correct`, `/reinspect`, `/revoke` and `/delete` shapes. Original reads return uploaded bytes; provider requests use a native MOV derivative with copied video packets and sample-trimmed float32 PCM for Opus/AAC, or copied MP3 packets. Original media queries retain their 2 MiB input limit. `media_inline_expansion_exceeded` can also mean that WebM/MKV PCM expansion exceeds the 8 MiB derivative limit; use `/video/upload`. This does not change the source revision/evidence contract.
 
 Native media can also be a search cue:
 
@@ -68,7 +71,7 @@ Use a distinct operation ID for each intentional write, and reuse it only for th
 
 ## Long video upload, segmentation and reasoning
 
-1. `POST /video/upload` with `{ mimeType: 'video/mp4' }` returns `uploadId` and `partBytes` (8 MiB).
+1. `POST /video/upload` with `{ mimeType: 'video/mp4' }` returns `uploadId` and `partBytes` (8 MiB). Supported alternatives are `video/quicktime`, `video/webm` and `video/x-matroska`.
 2. Send ordered raw chunks to `/video/part` with headers `memory-upload`, `memory-part` (1-based), `Content-Length`, and the API authorization. Keep returned `{partNumber, etag}` values. All chunks except the last must meet R2 multipart size requirements. The gateway caps one part at 32 MiB.
 3. Complete the upload and create a processing job:
 
@@ -79,6 +82,8 @@ const job = await memory('/video/complete-upload', {
 });
 // For fixed windows instead: strategy: 'fixed', seconds: 10.
 ```
+
+For WebM/MKV, a fixed window whose copied video plus derived PCM cannot fit returns `video_fixed_window_too_large_reduce_seconds`; reduce `seconds`. Each excerpt currently scans from the source beginning, and AAC fully decodes while retaining only the window. This path does not promise indexed seek performance. See [format and timing limits](MEDIA.md#webm-and-matroska-video).
 
 The job proceeds through Workers alarms while the service runs. Read `/video/status` with `{operationId:'video-001'}`; `/video/step` can explicitly advance a queued job. A queued job normally progresses automatically. A running job may still be waiting for a provider; polling status does not repeat its work. Do not call `/video/step` as a progress query: observing a running job there marks its outcome unknown to fence late results.
 

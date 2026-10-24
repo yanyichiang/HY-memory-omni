@@ -31,6 +31,8 @@ These packages are declared dependencies, installed by the recipient. They are n
 
 `memory/scripts/prepare-audio-codecs.mjs` likewise supplies static Opus/FLAC WASM modules without changing their decoder algorithms. Its generated copy of `codec-parser@2.5.0` has two documented EOF handling fixes: it retains a short final FLAC frame and respects a verified next-frame boundary while flushing. The fixed source is produced from the pinned original package using the included explicit transformations and retains the LGPL license. The wrapper's MIT license does not relicense this parser.
 
+`memory/scripts/prepare-matroska.mjs` creates a version-checked adaptation of Mediabunny 1.62.1 in `memory/.generated/mediabunny/`. It exports raw CodecDelay, SeekPreRoll and DiscardPadding metadata through packet side data and preserves the upstream packet bytes/timestamps. The generated modified source retains its original copyright headers and MPL-2.0 license; it is not relicensed under Apache-2.0. The preparation script, pinned upstream source archive and [modification record](memory/licenses/MATROSKA-PATCH.md) identify how to reproduce the source. Distributors of the generated executable must provide the corresponding generated MPL-covered source and notices under MPL-2.0. The separate HY Matroska adapter and PCM helpers interpret these fields and reuse the already listed Opus/AAC libraries; no new codec encoder or external transcoding service is introduced.
+
 ## Included AAC decoder
 
 `memory/codecs/aac/` contains an independent, replaceable FFmpeg 9.0 AAC decoder module, its C bridge, complete corresponding FFmpeg source archive, license texts and build instructions. This is a deliberate binary exception to the otherwise source-based application distribution. The decoder is built with GPL/nonfree components disabled and without FFmpeg's CLI, networking, demuxers or external codec libraries. Its library license is LGPL-2.1-or-later; it is not covered by this project's Apache notice. Emscripten-generated glue and runtime notices are included alongside it.
@@ -47,7 +49,7 @@ The Python lockfile includes annotated-types, anyio, distro, httpx, idna, jieba,
 
 ## Synthetic fixtures
 
-The media in `memory/test/fixtures/` and `test/live-fixtures/` are synthetic project fixtures: generated frames/tones, meeting notices and scripted meeting speech. Their [media provenance](memory/test/fixtures/README.md) and [live-case provenance](test/live-fixtures/README.md) identify the content; they contain no user recordings or production data. FFmpeg was used as a development tool and is not bundled. No FFmpeg program code is included by distributing its generated test media. Codec patent permissions are not granted by this project's copyright license.
+The media in `memory/test/fixtures/` and `test/live-fixtures/` are synthetic project fixtures: generated frames/tones, meeting notices and scripted meeting speech. Their [media provenance](memory/test/fixtures/README.md) and [live-case provenance](test/live-fixtures/README.md) identify the content; they contain no user recordings or production data. The FFmpeg command-line program was used as a development tool and is not bundled. Distributing its generated test media does not itself include FFmpeg program code; the separately included AAC library module and its source are documented above. Codec patent permissions are not granted by this project's copyright license.
 
 ## Building versus redistributing an executable
 

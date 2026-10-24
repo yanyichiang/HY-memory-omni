@@ -6,7 +6,7 @@ Run `npm run build`, then `npm run inspect -- /path/to/recording`. This local co
 | --- | --- | --- |
 | Images | PNG, JPEG, WebP, up to 8 MiB original bytes | Export one supported still image |
 | Audio | PCM WAV (u8/s16/s24/s32/f32, little-endian RIFF), MP3; M4A/ADTS AAC-LC, HE-AAC, HE-AACv2; Ogg Opus; native FLAC | See the codec limits below; RF64, compressed WAV and other Ogg codecs are not accepted |
-| Video | MP4/QuickTime; AVC, HEVC, AV1 or VP9; optional AAC/MP3 soundtrack | Select one video track and at most one soundtrack; export timestamps starting at zero |
+| Video | MP4/QuickTime with AVC, HEVC, AV1 or VP9 and optional AAC/MP3 soundtrack; restricted WebM/Matroska with the same video codecs and optional Opus/AAC/MP3 | Select one video track and at most one soundtrack; export timestamps starting at zero |
 
 Encrypted tracks and extra tracks are rejected, not silently discarded. Unsupported nonzero presentation origins are rejected because an untracked timestamp shift would break evidence coordinates. M4A supports the explicit priming/edit mapping described below. The inspector returns `media_tracks_invalid`, `media_codec_unsupported`, `media_timeline_origin`, or the specific audio parser error.
 
@@ -32,9 +32,33 @@ Small ingestion still requires original bytes at most 8 MiB and duration at most
 
 The first-batch codec tests exercise actual workerd decoding and synthetic lifecycle/wire behavior. Live calls accepted the derived WAVs, ingested M4A, retrieved it with Opus/AAC queries, and preserved reinspection/revocation. One FLAC query returned no grounded match despite intact decoded samples; it remains a semantic false negative. See [acceptance](ACCEPTANCE.md) for the retained first responses and verification boundary. See the [AAC module contract](../memory/codecs/aac/README.md) for its exact decoder and fixture evidence.
 
+## Video soundtrack retrieval
+
+Gemini Embedding 2 does not process a video's embedded audio track. Video embeddings now aggregate the native video and its actual extracted float32 WAV in the same request. The WAV retains its sample rate, channels and presentation offset; the request names that offset without adding silence. Existing video vectors without audio remain eligible with an explicit coverage limitation; whole-source reinspection rebuilds them. Video frame sampling remains a model limitation.
+
+ISO inline ingestion also checks the expanded soundtrack, including its 56-byte WAV header, against 8 MiB before storing the source. A small compressed file may require `/video/upload` with shorter clips. Fixed windows that cannot fit return `video_fixed_window_too_large_reduce_seconds`; dynamic analysis reduces oversized windows. Media queries have no multipart input and must fit the same bounded representation: choose a shorter query excerpt when `media_inline_expansion_exceeded` is returned.
+
+Audio/video queries keep native embedding. For evidence grounding, the configured reader first observes the query recording independently; candidate source checks receive that bounded query cue and the source's own native media. This prevents concatenating two recordings into one source timeline. The cue is a model interpretation, never stored-source evidence or Owner authority, and can miss details; grounded results must be assessed together with that limitation. Still-image cues remain directly supplied. Explicit relationship queries can ask for a later decision related to a proposal; unqualified cues must not treat every event in the same meeting as a match.
+
+## WebM and Matroska video
+
+Use `video/webm` or `video/x-matroska`. The adapter accepts exactly one AVC, HEVC, VP9 or AV1 video track and at most one Opus, AAC or MP3 audio track. Audio-only WebM/Matroska, Vorbis, VP8, extra tracks and other codecs are outside this interface. The file signature and EBML DocType must match the declared container; changing a suffix is not conversion.
+
+The original WebM/MKV is retained. Before perception, native media queries and embedding, the service copies video packets into a bounded `video/quicktime` MOV derivative. Opus and AAC use the existing WASM decoders to produce interleaved float32 PCM with sample-based head/tail trimming; MP3 packets are copied at their complete packet boundaries. This supplies actual frames and sound to the model, without replacing the recording with a transcript or starting an external transcoding process. For an inline source, `/read` returns the retained original. For a multipart recording root, `/read` requires a time range and returns a linked native excerpt; the original remains in storage. Reinspection, whole-source rebuild, revision invalidation and revocation retain their existing contracts.
+
+The structural preflight accepts one Segment in a finite file, with clusters bounded to 8 MiB and non-Void elements (including individual Blocks and metadata elements) bounded to 1 MiB. Source reads are at most 64 KiB. Unknown-size elements are restricted to Segment/Cluster; an unknown-size Cluster must still terminate within the cluster bound. Live tracks, encryption/compression or other content transformations, codec-state changes, lacing, invisible frames and non-unit TrackTimestampScale are rejected. These are implementation limits, not claims of complete Matroska support.
+
+Opus uses mapping family 0, mono/stereo, at 48 kHz; its CodecDelay must agree with OpusHead pre-skip. AAC uses the first-batch LC/HE/HEv2 decoder limits and validates delay on its decoded sample clock. Opus/AAC packet times must agree with the continuous sample clock within the container tick precision. Negative DiscardPadding, padding before the last packet, nonintegral sample padding and padding that removes a complete final packet are rejected. Unsupported delays on other tracks, invalid origins and discontinuous or inconsistent timelines fail closed. Keyframe expansion can make the actual video interval wider than the logical request; returned track mappings and offsets identify that interval. MOV timestamps retain the muxer's finite timebase precision; exact PCM trimming does not certify model event timestamps.
+
+Both original and derived bytes must fit the inline 8 MiB bound, and inline video still lasts at most 120 seconds. A highly compressed short original can exceed the derivative bound after PCM expansion: `media_inline_expansion_exceeded` means use `/video/upload`. Long video clips remain bounded; `video_fixed_window_too_large_reduce_seconds` means reduce fixed `seconds`. There is no application-level total recording duration cap.
+
+Current processing scans from the source beginning for every clip. AAC decodes the complete track but retains only the selected PCM window; Opus supplies retained decoder preroll before cropping. This is bounded processing, not efficient indexed random access, and repeated scans/decodes increase work with clip count. The synthetic fixtures check container, samples and lifecycle contracts. Real-model cross-clip revision and lifecycle evidence, plus retained retrieval failures and repairs, are recorded in [ACCEPTANCE](ACCEPTANCE.md).
+
+The build-time metadata adaptation and its generated MPL-covered source are described in [MATROSKA-PATCH.md](../memory/licenses/MATROSKA-PATCH.md). Its exported delay/preroll/padding fields leave original compressed bytes and upstream packet timestamps unchanged; the HY adapter owns their interpretation.
+
 ## Large recordings
 
-Use `/audio/*` for the audio formats above and `/video/*` for MP4/QuickTime multipart ingestion. Small `/ingest` retains its 8 MiB / 180-second audio / 120-second video limits. The multipart path does not impose an arbitrary total-duration limit, but each derived clip and each Worker execution remains bounded.
+Use `/audio/*` for the audio formats above and `/video/*` for supported MP4/QuickTime/WebM/Matroska multipart ingestion. Small `/ingest` retains its 8 MiB / 180-second audio / 120-second video limits. The multipart path does not impose an arbitrary total-duration limit, but each derived clip and each Worker execution remains bounded.
 
 Audio defaults to fixed 20-second windows; dynamic topic boundaries are also available. One requested audio window may not exceed 180 seconds, and its prepared WAV must fit 4 MiB. Reduce `seconds` for high-rate/multichannel audio; new compressed formats use four bytes per decoded sample plus the WAV header. Dynamic segmentation reduces oversized analysis windows before inference. Original bytes remain independent of derived WAV excerpts.
 
