@@ -40,7 +40,9 @@
     "config.example.json",
     "NOTICE",
     "THIRD_PARTY_NOTICES.md",
-    "memory/test/fixtures/README.md"
+    "memory/test/fixtures/README.md",
+    "README.en.md",
+    "AGENTS.md"
   ],
   "dependencies": {
     "esbuild": "0.28.1",
