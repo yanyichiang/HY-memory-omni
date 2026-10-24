@@ -1,0 +1,56 @@
+{
+  "name": "hy-memory-omni",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Source-aware multimodal memory based on Tencent Hy-Memory, running on Workers",
+  "author": "YY",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "bin": {
+    "hy-memory-omni": "scripts/cli.mjs"
+  },
+  "scripts": {
+    "init": "node scripts/cli.mjs init",
+    "setup": "node scripts/cli.mjs setup",
+    "start": "node scripts/cli.mjs start",
+    "build": "node memory/build.mjs",
+    "typecheck": "tsc --noEmit -p memory/tsconfig.json",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:memory": "node --test --test-concurrency=1 memory/test/*.test.mjs",
+    "test:install": "node test/install-smoke.mjs"
+  },
+  "files": [
+    "scripts/",
+    "gateway/",
+    "memory/src/",
+    "memory/scripts/",
+    "memory/build.mjs",
+    "memory/licenses/",
+    "memory/wrangler.jsonc",
+    "memory/worker-configuration.d.ts",
+    "engine/src/",
+    "engine/pyproject.toml",
+    "engine/pylock.toml",
+    "engine/wrangler.jsonc",
+    "engine/UPSTREAM-LICENSE",
+    "docs/",
+    "config.example.json",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
+    "memory/test/fixtures/README.md"
+  ],
+  "dependencies": {
+    "esbuild": "0.28.1",
+    "miniflare": "5.20261012.0-beta",
+    "mediabunny": "1.62.1",
+    "mpg123-decoder": "1.0.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261014.1",
+    "typescript": "5.9.3",
+    "wrangler": "4.151.0"
+  }
+}

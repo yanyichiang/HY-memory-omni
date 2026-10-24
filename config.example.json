@@ -1,0 +1,11 @@
+{
+  "HY_OWNER_REF": "personal",
+  "CF_ACCOUNT_ID": "REPLACE_WITH_ACCOUNT_ID",
+  "MEMORY_GATEWAY_ID": "REPLACE_WITH_GATEWAY_ID",
+  "MEMORY_MODEL_TOKEN": "REPLACE_WITH_CF_USER_API_TOKEN",
+  "MEMORY_FORMATION_MODEL": "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+  "MEMORY_TEXT_EMBEDDING_MODEL": "@cf/qwen/qwen3-embedding-0.6b",
+  "MEMORY_MEDIA_EMBEDDING_MODEL": "gemini-embedding-2",
+  "MEMORY_TEMPORAL_MODEL": "gemini-2.5-flash",
+  "HY_EMBED_DIMS": "1024"
+}

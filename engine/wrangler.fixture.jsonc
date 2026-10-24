@@ -1,0 +1,28 @@
+{
+  "name": "hy-memory-engine-fixture",
+  "main": "src/fixture_worker.py",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": [
+    "python_workers"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": false
+  },
+  "python_modules": {
+    "exclude": [
+      "**/*.pyc",
+      "jieba/lac_small/**"
+    ]
+  },
+  "vars": {
+    "HY_LLM_URL": "synthetic",
+    "HY_LLM_MODEL": "synthetic",
+    "HY_LLM_KEY": "synthetic",
+    "HY_EMBED_URL": "synthetic",
+    "HY_EMBED_MODEL": "synthetic",
+    "HY_EMBED_KEY": "synthetic",
+    "HY_EMBED_DIMS": "synthetic"
+  }
+}

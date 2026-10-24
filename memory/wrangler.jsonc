@@ -1,0 +1,25 @@
+{
+  // Deployment template. Configure your own resources; npm start uses local emulation.
+  "name": "hy-memory-omni-store",
+  "main": "src/worker.ts",
+  "build": { "command": "node scripts/prepare-mp3.mjs" },
+  "find_additional_modules": true,
+  "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }],
+  "compatibility_date": "2026-10-19",
+  "workers_dev": false,
+  "preview_urls": false,
+  "secrets": { "required": ["MEMORY_MODEL_TOKEN"] },
+  "durable_objects": { "bindings": [{ "name": "MEMORY", "class_name": "MemoryObject" }] },
+  "migrations": [{ "tag": "hy-media-v1", "new_sqlite_classes": ["MemoryObject"] }],
+  "r2_buckets": [{ "binding": "ORIGINALS", "bucket_name": "hy-memory-omni-store-originals" }],
+  "services": [{ "binding": "HY_ENGINE", "service": "hy-memory-engine" }],
+  "vars": {
+    "CF_ACCOUNT_ID": "unconfigured",
+    "MEMORY_GATEWAY_ID": "unconfigured",
+    "MEMORY_FORMATION_MODEL": "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+    "MEMORY_TEXT_EMBEDDING_MODEL": "@cf/qwen/qwen3-embedding-0.6b",
+    "MEMORY_MEDIA_EMBEDDING_MODEL": "gemini-embedding-2",
+    "MEMORY_TEMPORAL_MODEL": "gemini-2.5-flash"
+  },
+  "observability": { "enabled": false }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "hy-memory-omni-worker",
+  "version": "0.1.0",
+  "author": "YY",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261014.1",
+    "esbuild": "0.28.1",
+    "miniflare": "5.20261012.0-beta",
+    "wrangler": "4.151.0"
+  },
+  "dependencies": {
+    "mediabunny": "1.62.1",
+    "mpg123-decoder": "1.0.3"
+  },
+  "license": "Apache-2.0"
+}

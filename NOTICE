@@ -1,0 +1,18 @@
+HY-memory-omni
+Copyright 2026 YY
+
+Original project code and documentation are licensed under Apache-2.0.
+Third-party components retain their own copyrights and licenses.
+
+This project includes Hy-Memory code by Tencent:
+Copyright (C) 2026 Tencent. All rights reserved.
+Source: https://github.com/Tencent-Hunyuan/Hy-Memory
+Revision: 4c311b2e935ef76a72e568adbb312c155bd4c1a1
+License: Apache-2.0; the original notice and license are retained in
+engine/UPSTREAM-LICENSE. The vendored Python files in engine/src/hy_memory
+are unchanged from that revision; integration code is outside that tree.
+
+This project is an independent integration and is not presented as a
+Tencent product or an endorsement by Tencent.
+
+See THIRD_PARTY_NOTICES.md for dependency and distribution information.

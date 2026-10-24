@@ -1,0 +1,485 @@
+{
+  "description": "Fixed first-answer relation cases. Pass ONLY input.pairs and input.evidence to CloudflareKnowledgeModels.relate; expected is evaluation metadata, never model input. No case grants Owner identity or permissions.",
+  "cases": [
+    {
+      "id": "same-name-organizations",
+      "input": {
+        "pairs": [
+          {
+            "left": {
+              "id": "same-name-organizations-left",
+              "key": "schedule",
+              "nodeId": "fixed-l2-0",
+              "text": "李明（甲公司）的办公地点是上海。",
+              "quote": "李明（甲公司）的办公地点是上海。",
+              "subject": "李明（甲公司）",
+              "event": "甲公司员工任职",
+              "predicate": "办公地点",
+              "value": "上海",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "same-name-organizations-left",
+                "revision": 1,
+                "mediaRef": "media://same-name-organizations-left"
+              },
+              "roots": [
+                "same-name-organizations-left"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            },
+            "right": {
+              "id": "same-name-organizations-right",
+              "key": "schedule",
+              "nodeId": "fixed-l2-1",
+              "text": "李明（乙公司）的办公地点是北京。",
+              "quote": "李明（乙公司）的办公地点是北京。",
+              "subject": "李明（乙公司）",
+              "event": "乙公司员工任职",
+              "predicate": "办公地点",
+              "value": "北京",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "same-name-organizations-right",
+                "revision": 1,
+                "mediaRef": "media://same-name-organizations-right"
+              },
+              "roots": [
+                "same-name-organizations-right"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "source": {
+              "sourceId": "same-name-organizations-left",
+              "revision": 1,
+              "mediaRef": "media://same-name-organizations-left"
+            },
+            "text": "李明（甲公司）的办公地点是上海。"
+          },
+          {
+            "source": {
+              "sourceId": "same-name-organizations-right",
+              "revision": 1,
+              "mediaRef": "media://same-name-organizations-right"
+            },
+            "text": "李明（乙公司）的办公地点是北京。"
+          }
+        ]
+      },
+      "expected": {
+        "kinds": [
+          "different"
+        ],
+        "independentSourceStatus": "unknown",
+        "note": "Different source identifiers do not establish independent origins, identity or authority."
+      }
+    },
+    {
+      "id": "consecutive-weekly-meetings",
+      "input": {
+        "pairs": [
+          {
+            "left": {
+              "id": "consecutive-weekly-meetings-left",
+              "key": "schedule",
+              "nodeId": "fixed-l2-0",
+              "text": "项目组 2026-10-19 周会在 A 室举行。",
+              "quote": "项目组 2026-10-19 周会在 A 室举行。",
+              "subject": "项目组",
+              "event": "2026-10-19 周会",
+              "predicate": "会议地点",
+              "value": "A 室",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "consecutive-weekly-meetings-left",
+                "revision": 1,
+                "mediaRef": "media://consecutive-weekly-meetings-left"
+              },
+              "roots": [
+                "consecutive-weekly-meetings-left"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            },
+            "right": {
+              "id": "consecutive-weekly-meetings-right",
+              "key": "schedule",
+              "nodeId": "fixed-l2-1",
+              "text": "项目组 2026-10-26 周会在 A 室举行。",
+              "quote": "项目组 2026-10-26 周会在 A 室举行。",
+              "subject": "项目组",
+              "event": "2026-10-26 周会",
+              "predicate": "会议地点",
+              "value": "A 室",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "consecutive-weekly-meetings-right",
+                "revision": 1,
+                "mediaRef": "media://consecutive-weekly-meetings-right"
+              },
+              "roots": [
+                "consecutive-weekly-meetings-right"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "source": {
+              "sourceId": "consecutive-weekly-meetings-left",
+              "revision": 1,
+              "mediaRef": "media://consecutive-weekly-meetings-left"
+            },
+            "text": "项目组 2026-10-19 周会在 A 室举行。"
+          },
+          {
+            "source": {
+              "sourceId": "consecutive-weekly-meetings-right",
+              "revision": 1,
+              "mediaRef": "media://consecutive-weekly-meetings-right"
+            },
+            "text": "项目组 2026-10-26 周会在 A 室举行。"
+          }
+        ]
+      },
+      "expected": {
+        "kinds": [
+          "different"
+        ],
+        "independentSourceStatus": "unknown",
+        "note": "Different source identifiers do not establish independent origins, identity or authority."
+      }
+    },
+    {
+      "id": "original-transcript",
+      "input": {
+        "pairs": [
+          {
+            "left": {
+              "id": "original-transcript-left",
+              "key": "schedule",
+              "nodeId": "fixed-l2-0",
+              "text": "录音中主持人说：会议 M-17 定于 2026-10-26 09:00 开始。",
+              "quote": "录音中主持人说：会议 M-17 定于 2026-10-26 09:00 开始。",
+              "subject": "会议 M-17",
+              "event": "会议 M-17",
+              "predicate": "开始时间",
+              "value": "2026-10-26 09:00",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "original-transcript-left",
+                "revision": 1,
+                "mediaRef": "media://original-transcript-left"
+              },
+              "roots": [
+                "original-transcript-left"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            },
+            "right": {
+              "id": "original-transcript-right",
+              "key": "schedule",
+              "nodeId": "fixed-l2-1",
+              "text": "原录音的转写：会议 M-17 定于 2026-10-26 09:00 开始。",
+              "quote": "原录音的转写：会议 M-17 定于 2026-10-26 09:00 开始。",
+              "subject": "会议 M-17",
+              "event": "会议 M-17",
+              "predicate": "开始时间",
+              "value": "2026-10-26 09:00",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "original-transcript-right",
+                "revision": 1,
+                "mediaRef": "media://original-transcript-right"
+              },
+              "roots": [
+                "original-transcript-left"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "source": {
+              "sourceId": "original-transcript-left",
+              "revision": 1,
+              "mediaRef": "media://original-transcript-left"
+            },
+            "text": "录音中主持人说：会议 M-17 定于 2026-10-26 09:00 开始。"
+          },
+          {
+            "source": {
+              "sourceId": "original-transcript-right",
+              "revision": 1,
+              "mediaRef": "media://original-transcript-right"
+            },
+            "text": "原录音的转写：会议 M-17 定于 2026-10-26 09:00 开始。"
+          }
+        ]
+      },
+      "expected": {
+        "kinds": [
+          "same"
+        ],
+        "independentSourceStatus": "shared-root-not-independent",
+        "note": "Different source identifiers do not establish independent origins, identity or authority."
+      }
+    },
+    {
+      "id": "reused-notice-different-occurrences",
+      "input": {
+        "pairs": [
+          {
+            "left": {
+              "id": "reused-notice-different-occurrences-left",
+              "key": "schedule",
+              "nodeId": "fixed-l2-0",
+              "text": "2026-10-19 的签到现场使用公告“每周例会在 A 室”，本次会议在 A 室。",
+              "quote": "2026-10-19 的签到现场使用公告“每周例会在 A 室”，本次会议在 A 室。",
+              "subject": "每周例会",
+              "event": "2026-10-19 例会",
+              "predicate": "会议地点",
+              "value": "A 室",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "reused-notice-different-occurrences-left",
+                "revision": 1,
+                "mediaRef": "media://reused-notice-different-occurrences-left"
+              },
+              "roots": [
+                "reused-notice-different-occurrences-left"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            },
+            "right": {
+              "id": "reused-notice-different-occurrences-right",
+              "key": "schedule",
+              "nodeId": "fixed-l2-1",
+              "text": "2026-10-26 的签到现场再次使用公告“每周例会在 A 室”，本次会议在 A 室。",
+              "quote": "2026-10-26 的签到现场再次使用公告“每周例会在 A 室”，本次会议在 A 室。",
+              "subject": "每周例会",
+              "event": "2026-10-26 例会",
+              "predicate": "会议地点",
+              "value": "A 室",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "reused-notice-different-occurrences-right",
+                "revision": 1,
+                "mediaRef": "media://reused-notice-different-occurrences-right"
+              },
+              "roots": [
+                "reused-notice-different-occurrences-right"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "source": {
+              "sourceId": "reused-notice-different-occurrences-left",
+              "revision": 1,
+              "mediaRef": "media://reused-notice-different-occurrences-left"
+            },
+            "text": "2026-10-19 的签到现场使用公告“每周例会在 A 室”，本次会议在 A 室。"
+          },
+          {
+            "source": {
+              "sourceId": "reused-notice-different-occurrences-right",
+              "revision": 1,
+              "mediaRef": "media://reused-notice-different-occurrences-right"
+            },
+            "text": "2026-10-26 的签到现场再次使用公告“每周例会在 A 室”，本次会议在 A 室。"
+          }
+        ]
+      },
+      "expected": {
+        "kinds": [
+          "different"
+        ],
+        "independentSourceStatus": "unknown",
+        "note": "Different source identifiers do not establish independent origins, identity or authority."
+      }
+    },
+    {
+      "id": "explicit-id-conflicting-dates",
+      "input": {
+        "pairs": [
+          {
+            "left": {
+              "id": "explicit-id-conflicting-dates-left",
+              "key": "schedule",
+              "nodeId": "fixed-l2-0",
+              "text": "会议 M-17 定于 2026-10-26 09:00 开始，未注明改期。",
+              "quote": "会议 M-17 定于 2026-10-26 09:00 开始，未注明改期。",
+              "subject": "会议 M-17",
+              "event": "会议 M-17",
+              "predicate": "开始时间",
+              "value": "2026-10-26 09:00",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "explicit-id-conflicting-dates-left",
+                "revision": 1,
+                "mediaRef": "media://explicit-id-conflicting-dates-left"
+              },
+              "roots": [
+                "explicit-id-conflicting-dates-left"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            },
+            "right": {
+              "id": "explicit-id-conflicting-dates-right",
+              "key": "schedule",
+              "nodeId": "fixed-l2-1",
+              "text": "会议 M-17 定于 2026-10-27 09:00 开始，未注明改期。",
+              "quote": "会议 M-17 定于 2026-10-27 09:00 开始，未注明改期。",
+              "subject": "会议 M-17",
+              "event": "会议 M-17",
+              "predicate": "开始时间",
+              "value": "2026-10-27 09:00",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "explicit-id-conflicting-dates-right",
+                "revision": 1,
+                "mediaRef": "media://explicit-id-conflicting-dates-right"
+              },
+              "roots": [
+                "explicit-id-conflicting-dates-right"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "source": {
+              "sourceId": "explicit-id-conflicting-dates-left",
+              "revision": 1,
+              "mediaRef": "media://explicit-id-conflicting-dates-left"
+            },
+            "text": "会议 M-17 定于 2026-10-26 09:00 开始，未注明改期。"
+          },
+          {
+            "source": {
+              "sourceId": "explicit-id-conflicting-dates-right",
+              "revision": 1,
+              "mediaRef": "media://explicit-id-conflicting-dates-right"
+            },
+            "text": "会议 M-17 定于 2026-10-27 09:00 开始，未注明改期。"
+          }
+        ]
+      },
+      "expected": {
+        "kinds": [
+          "conflict"
+        ],
+        "independentSourceStatus": "unknown",
+        "note": "Different source identifiers do not establish independent origins, identity or authority."
+      }
+    },
+    {
+      "id": "similar-voices-unknown-identity",
+      "input": {
+        "pairs": [
+          {
+            "left": {
+              "id": "similar-voices-unknown-identity-left",
+              "key": "schedule",
+              "nodeId": "fixed-l2-0",
+              "text": "录音 A 中身份未知的说话者说“我住上海”。",
+              "quote": "录音 A 中身份未知的说话者说“我住上海”。",
+              "subject": "录音 A 中身份未知的说话者",
+              "event": "录音 A 说话者居住状态",
+              "predicate": "居住地",
+              "value": "上海",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "similar-voices-unknown-identity-left",
+                "revision": 1,
+                "mediaRef": "media://similar-voices-unknown-identity-left"
+              },
+              "roots": [
+                "similar-voices-unknown-identity-left"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            },
+            "right": {
+              "id": "similar-voices-unknown-identity-right",
+              "key": "schedule",
+              "nodeId": "fixed-l2-1",
+              "text": "录音 B 中身份未知的说话者说“我住北京”。声音听起来与录音 A 相似，但没有证据表明是同一人。",
+              "quote": "录音 B 中身份未知的说话者说“我住北京”。声音听起来与录音 A 相似，但没有证据表明是同一人。",
+              "subject": "录音 B 中身份未知的说话者",
+              "event": "录音 B 说话者居住状态",
+              "predicate": "居住地",
+              "value": "北京",
+              "validTime": "",
+              "conditions": "",
+              "source": {
+                "sourceId": "similar-voices-unknown-identity-right",
+                "revision": 1,
+                "mediaRef": "media://similar-voices-unknown-identity-right"
+              },
+              "roots": [
+                "similar-voices-unknown-identity-right"
+              ],
+              "observedAt": "2026-10-24T00:00:00Z",
+              "authority": "observation"
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "source": {
+              "sourceId": "similar-voices-unknown-identity-left",
+              "revision": 1,
+              "mediaRef": "media://similar-voices-unknown-identity-left"
+            },
+            "text": "录音 A 中身份未知的说话者说“我住上海”。"
+          },
+          {
+            "source": {
+              "sourceId": "similar-voices-unknown-identity-right",
+              "revision": 1,
+              "mediaRef": "media://similar-voices-unknown-identity-right"
+            },
+            "text": "录音 B 中身份未知的说话者说“我住北京”。声音听起来与录音 A 相似，但没有证据表明是同一人。"
+          }
+        ]
+      },
+      "expected": {
+        "kinds": [
+          "different"
+        ],
+        "independentSourceStatus": "unknown",
+        "note": "Different source identifiers do not establish independent origins, identity or authority."
+      }
+    }
+  ]
+}

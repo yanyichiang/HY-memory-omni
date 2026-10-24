@@ -1,0 +1,11 @@
+{
+  "name": "hy-memory-engine",
+  "main": "src/main.py",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": ["python_workers"],
+  "workers_dev": false,
+  "services": [{"binding":"MEMORY_READ","service":"hy-memory-omni-store","entrypoint":"MemoryReadAPI"}],
+  "preview_urls": false,
+  "observability": {"enabled": false},
+  "python_modules": {"exclude": ["**/*.pyc", "jieba/lac_small/**"]}
+}

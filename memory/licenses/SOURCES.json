@@ -1,0 +1,38 @@
+{
+  "packages": [
+    {
+      "name": "mpg123-decoder",
+      "version": "1.0.3",
+      "license": "MIT",
+      "packageSource": "https://registry.npmjs.org/mpg123-decoder/-/mpg123-decoder-1.0.3.tgz",
+      "gitHead": "8f2428c1cd96b54dab74836c8471ff75fe35cbee"
+    },
+    {
+      "name": "@wasm-audio-decoders/common",
+      "version": "9.0.7",
+      "license": "MIT",
+      "packageSource": "https://registry.npmjs.org/@wasm-audio-decoders/common/-/common-9.0.7.tgz",
+      "gitHead": "e4f7eef8cda48719a884023582d8efc5b8d76f6c"
+    },
+    {
+      "name": "simple-yenc",
+      "version": "1.0.4",
+      "license": "MIT",
+      "packageSource": "https://registry.npmjs.org/simple-yenc/-/simple-yenc-1.0.4.tgz",
+      "gitHead": "3f87552b39abc2791f1e5331cb444a2726abeb86"
+    }
+  ],
+  "mitTextProvenance": {
+    "wrapperAndCommon": "npm packages omit LICENSE files; upstream README declares MIT. Copyright notice copied from mpg123-decoder@1.0.3 dist banner. MIT permission/disclaimer text copied from simple-yenc@1.0.4 LICENSE (same standard MIT terms). This file is assembled attribution, not claimed to be an original omitted upstream LICENSE.",
+    "simpleYenc": "Unmodified LICENSE from simple-yenc@1.0.4 npm archive"
+  },
+  "wrapperSource": "https://github.com/eshaz/wasm-audio-decoders/tree/8f2428c1cd96b54dab74836c8471ff75fe35cbee",
+  "wrapperSourceArchive": "https://github.com/eshaz/wasm-audio-decoders/archive/8f2428c1cd96b54dab74836c8471ff75fe35cbee.tar.gz",
+  "wrapperBuild": "https://github.com/eshaz/wasm-audio-decoders/blob/8f2428c1cd96b54dab74836c8471ff75fe35cbee/Makefile",
+  "wrapperBuildInstructions": "https://github.com/eshaz/wasm-audio-decoders/blob/8f2428c1cd96b54dab74836c8471ff75fe35cbee/README.md#building",
+  "mpg123Source": "https://github.com/madebr/mpg123/tree/08247b317163175e62035893af3ff9e71a5dfefd",
+  "mpg123SourceArchive": "https://github.com/madebr/mpg123/archive/08247b317163175e62035893af3ff9e71a5dfefd.tar.gz",
+  "mpg123CopyrightAndLicense": "https://github.com/madebr/mpg123/blob/08247b317163175e62035893af3ff9e71a5dfefd/COPYING",
+  "upstreamChanges": "Only JS import routing in generated copies, to exclude Worker adapters. No changes to mpg123 C, upstream original files, WASM bytes, or decoder logic.",
+  "buildAdapter": "memory/scripts/prepare-mp3.mjs"
+}
