@@ -216,22 +216,92 @@ function unsupportedRelations(rels, coverage, part, allowed) {
 
 function docx(parts, main, mime, units, totalCoverage) {
   const base = [issue('native-structure-not-print-pages', main), issue('styles-numbering-theme-not-resolved', main)];
-  const rels = relationships(parts, main, base); unsupportedRelations(rels, base, main, ['image']);
+  const rels = relationships(parts, main, base); unsupportedRelations(rels, base, main, ['image', 'styles']);
   const root = xml(parts, main); if (!is(root, 'w', 'document')) fail('document_docx_root_invalid');
   const body = child(root, 'w', 'body'); if (!body) fail('document_docx_body_missing');
+  // Raw formatting evidence only: OOXML toggle properties and style precedence
+  // are deliberately not evaluated into effective Word formatting.
+  function property(node) {
+    if (!node) return undefined;
+    return { kind: node.local, ...(NS.w.includes(node.uri) ? {} : { namespace: node.uri }), attributes: Object.fromEntries((node.attributes ?? []).map(a =>
+      [!a.uri || NS.w.includes(a.uri) ? a.local : `{${a.uri}}${a.local}`, a.value])),
+      ...(node.text !== undefined ? { text: node.text } : {}),
+      children: node.children.filter(c => c.local !== '#text').map(property) };
+  }
+  const styleRelations = [...rels.values()].filter(r => !r.external && relationshipType(r.type, 'styles'));
+  if (styleRelations.length > 1) fail('document_docx_styles_relationship_invalid');
+  const stylePart = styleRelations[0]?.part, styleRoot = stylePart ? xml(parts, stylePart) : undefined;
+  if (styleRoot && !is(styleRoot, 'w', 'styles')) fail('document_docx_styles_root_invalid');
+  const styleMap = new Map(), defaultStyles = new Map();
+  for (const node of styleRoot ? children(styleRoot, 'w', 'style') : []) {
+    const id = attr(node, 'styleId', 'w'), type = attr(node, 'type', 'w');
+    if (!id || styleMap.has(id)) fail('document_docx_style_id_invalid');
+    styleMap.set(id, node);
+    if (['1', 'true', 'on'].includes(attr(node, 'default', 'w'))) {
+      if (defaultStyles.has(type)) fail('document_docx_style_default_invalid');
+      defaultStyles.set(type, id);
+    }
+  }
+  const defaults = property(styleRoot && child(styleRoot, 'w', 'docDefaults'));
+  const sections = []; let section = 0;
+  for (const block of body.children.filter(n => n.local !== '#text')) {
+    const end = is(block, 'w', 'sectPr') ? block : descendants(block, 'w', 'sectPr')[0];
+    if (end) { sections[section] = property(end); if (!is(block, 'w', 'sectPr')) section++; }
+  }
+  function styleEvidence(block, coverage) {
+    const references = [];
+    for (const [element, type] of [['pStyle', 'paragraph'], ['rStyle', 'character'], ['tblStyle', 'table']]) {
+      for (const node of descendants(block, 'w', element)) {
+        const id = attr(node, 'val', 'w'); if (id) references.push({ styleId: id, type, reference: 'explicit' });
+      }
+    }
+    // Defaults are applicable references, not a claim that final formatting is resolved.
+    for (const [element, ref, type] of [['p', 'pStyle', 'paragraph'], ['r', 'rStyle', 'character'], ['tbl', 'tblStyle', 'table']]) {
+      const nodes = [...(is(block, 'w', element) ? [block] : []), ...descendants(block, 'w', element)];
+      if (defaultStyles.has(type) && nodes.some(n => !descendants(n, 'w', ref).length)) references.push({ styleId: defaultStyles.get(type), type, reference: 'default' });
+    }
+    const used = new Map();
+    for (const reference of references) {
+      let id = reference.styleId; const path = new Set();
+      while (id) {
+        if (path.has(id)) { coverage.push(issue('docx-style-cycle-not-resolved', stylePart ?? main, { styleId: id })); break; }
+        path.add(id);
+        const node = styleMap.get(id);
+        if (!node) { coverage.push(issue('docx-style-reference-missing', stylePart ?? main, { styleId: id })); break; }
+        if (used.has(id)) break;
+        const parent = attr(child(node, 'w', 'basedOn'), 'val', 'w');
+        used.set(id, { styleId: id, type: attr(node, 'type', 'w'), basedOn: parent, definition: property(node) });
+        if (parent && styleMap.has(parent) && attr(styleMap.get(parent), 'type', 'w') !== attr(node, 'type', 'w')) {
+          coverage.push(issue('docx-style-base-type-mismatch-not-resolved', stylePart, { styleId: id, basedOn: parent }));
+        }
+        id = parent;
+      }
+    }
+    return { ...(stylePart ? { part: stylePart } : {}), resolved: false,
+      note: 'Raw OOXML formatting and referenced style definitions; toggle/inheritance, theme, numbering and conditional table rules are not computed. Hidden/strike formatting is not an authenticated revision.',
+      ...(defaults ? { docDefaults: defaults } : {}), references, styles: [...used.values()] };
+  }
   let blockIndex = 0, sectionIndex = 0;
   function paragraph(n) {
-    const segments = [];
-    function visit(node) {
-      if (is(node, 'w', 't')) segments.push({ kind: 'text', text: nodeText(node) });
-      else if (is(node, 'w', 'tab')) segments.push({ kind: 'tab', text: '\t' });
-      else if (is(node, 'w', 'noBreakHyphen')) segments.push({ kind: 'text', text: '\u2011' });
-      else if (is(node, 'w', 'softHyphen')) segments.push({ kind: 'text', text: '\u00ad' });
-      else if (is(node, 'w', 'br') || is(node, 'w', 'cr')) segments.push({ kind: 'break', text: '\n', type: attr(node, 'type', 'w') });
-      else for (const c of node.children) visit(c);
+    const segments = [], runs = [];
+    function visit(node, runIndex) {
+      if (is(node, 'w', 'pPr') || is(node, 'w', 'rPr')) return;
+      if (is(node, 'w', 'r')) {
+        runIndex = runs.length;
+        const pr = child(node, 'w', 'rPr');
+        runs.push({ runIndex, properties: property(pr), styleId: attr(pr && child(pr, 'w', 'rStyle'), 'val', 'w') });
+      }
+      let segment;
+      if (is(node, 'w', 't')) segment = { kind: 'text', text: nodeText(node) };
+      else if (is(node, 'w', 'tab')) segment = { kind: 'tab', text: '\t' };
+      else if (is(node, 'w', 'noBreakHyphen')) segment = { kind: 'text', text: '\u2011' };
+      else if (is(node, 'w', 'softHyphen')) segment = { kind: 'text', text: '\u00ad' };
+      else if (is(node, 'w', 'br') || is(node, 'w', 'cr')) segment = { kind: 'break', text: '\n', type: attr(node, 'type', 'w') };
+      if (segment) segments.push({ ...segment, ...(runIndex === undefined ? {} : { runIndex }) });
+      else for (const c of node.children) visit(c, runIndex);
     }
     visit(n);
-    return { text: segments.map(s => s.text).join(''), segments,
+    return { text: segments.map(s => s.text).join(''), segments, runs, paragraphProperties: property(child(n, 'w', 'pPr')),
       styleId: attr(child(child(n, 'w', 'pPr') ?? { children: [] }, 'w', 'pStyle'), 'val', 'w') };
   }
   for (const n of body.children.filter(n => n.local !== '#text')) {
@@ -245,19 +315,21 @@ function docx(parts, main, mime, units, totalCoverage) {
         const rowPr = child(tr, 'w', 'trPr') ?? { children: [] };
         let columnIndex = Number(attr(child(rowPr, 'w', 'gridBefore'), 'val', 'w') ?? 0);
         if (!Number.isSafeInteger(columnIndex) || columnIndex < 0 || columnIndex > 16384) fail('document_table_span_invalid');
-        return { rowIndex, cells: children(tr, 'w', 'tc').map(tc => {
+        return { rowIndex, properties: property(rowPr), cells: children(tr, 'w', 'tc').map(tc => {
           const pr = child(tc, 'w', 'tcPr') ?? { children: [] };
           const span = Number(attr(child(pr, 'w', 'gridSpan'), 'val', 'w') ?? 1);
           if (!Number.isSafeInteger(span) || span < 1 || span > 16384) fail('document_table_span_invalid');
-          const cell = { rowIndex, columnIndex, columnSpan: span, verticalMerge: attr(child(pr, 'w', 'vMerge'), 'val', 'w') ?? (child(pr, 'w', 'vMerge') ? 'continue' : undefined),
+          const cell = { rowIndex, columnIndex, columnSpan: span, properties: property(pr), verticalMerge: attr(child(pr, 'w', 'vMerge'), 'val', 'w') ?? (child(pr, 'w', 'vMerge') ? 'continue' : undefined),
             paragraphs: children(tc, 'w', 'p').map(paragraph) };
           columnIndex += span; return cell;
         }) };
       });
-      context = { blockType: 'table', rows,
+      context = { blockType: 'table', rows, tableProperties: property(child(n, 'w', 'tblPr')),
         gridColumns: children(child(n, 'w', 'tblGrid') ?? { children: [] }, 'w', 'gridCol').map(c => ({ widthTwips: attr(c, 'w', 'w') })) };
       if (descendants(n, 'w', 'tbl').length) coverage.push(issue('nested-table-not-interpreted', main));
     } else { totalCoverage.push(issue('docx-block-not-interpreted', main, { blockIndex: locator.blockIndex, kind: n.local, namespace: n.uri })); continue; }
+    context.formatting = styleEvidence(n, coverage);
+    if (sections[sectionIndex]) context.sectionProperties = sections[sectionIndex];
     let drawingIndex = 0;
     const drawingEntries = context.blockType === 'table'
       ? children(n, 'w', 'tr').flatMap((tr, ri) => children(tr, 'w', 'tc').flatMap((tc, ci) => descendants(tc, 'w', 'drawing').map(d => ({ d, rowIndex: ri, columnIndex: context.rows[ri].cells[ci].columnIndex }))))
@@ -285,6 +357,18 @@ function columnName(column) { let result = ''; for (; column; column = Math.floo
 const rangeName = r => columnName(r.c1) + r.r1 + ':' + columnName(r.c2) + r.r2;
 function parseRange(ref) { const pieces = (ref ?? '').split(':'); if (pieces.length > 2) fail('document_cell_range_invalid'); const [a, b = a] = pieces; const p = cellPosition(a), q = cellPosition(b); if (p.row > q.row || p.column > q.column) fail('document_cell_range_invalid'); return { r1: p.row, c1: p.column, r2: q.row, c2: q.column }; }
 const intersects = (a, b) => a.r1 <= b.r2 && b.r1 <= a.r2 && a.c1 <= b.c2 && b.c1 <= a.c2;
+// Preserve property provenance without claiming that fonts/themes/cascades were rendered.
+function rawProperties(node) {
+  if (!node) return undefined;
+  return { kind: node.local, namespace: node.uri, attributes: node.attributes,
+    ...(node.text === undefined ? {} : { text: node.text }), children: node.children.map(rawProperties) };
+}
+function sheetString(node) {
+  if (!node) return undefined;
+  // Phonetic guides are annotations, not additional cell text.
+  return { text: node.children.filter(n => is(n, 's', 't') || is(n, 's', 'r')).map(n =>
+    is(n, 's', 't') ? nodeText(n) : children(n, 's', 't').map(nodeText).join('')).join(''), properties: rawProperties(node) };
+}
 function spreadsheet(parts, main, mime, units, totalCoverage) {
   const base = [issue('native-structure-not-print-pages', main), issue('formula-not-recalculated-chart-theme-not-rendered', main)];
   const rels = relationships(parts, main, base); unsupportedRelations(rels, base, main, ['worksheet', 'sharedStrings', 'styles']);
@@ -294,23 +378,47 @@ function spreadsheet(parts, main, mime, units, totalCoverage) {
   const dateSystem=['1','true'].includes(workbookProperties.date1904)?'1904':'1900';
   function related(kind) { return [...rels.values()].find(r => relationshipType(r.type, kind))?.part; }
   const sharedPart = related('sharedStrings');
-  const shared = sharedPart ? children(xml(parts, sharedPart), 's', 'si').map(si => descendants(si, 's', 't').map(nodeText).join('')) : [];
+  const sharedRoot = sharedPart ? xml(parts, sharedPart) : undefined;
+  if (sharedRoot && !is(sharedRoot, 's', 'sst')) fail('document_shared_strings_root_invalid');
+  const shared = sharedRoot ? children(sharedRoot, 's', 'si').map(sheetString) : [];
   const stylePart = related('styles'), stylesRoot = stylePart ? xml(parts, stylePart) : undefined;
-  const styles = stylesRoot ? children(child(stylesRoot, 's', 'cellXfs') ?? { children: [] }, 's', 'xf').map(plainAttrs) : [];
+  if (stylesRoot && !is(stylesRoot, 's', 'styleSheet')) fail('document_styles_root_invalid');
+  const styleItems = (container, item) => stylesRoot ? children(child(stylesRoot, 's', container) ?? { children: [] }, 's', item) : [];
+  const styles = styleItems('cellXfs', 'xf'), baseStyles = styleItems('cellStyleXfs', 'xf');
+  const resources = { fontId: styleItems('fonts', 'font'), fillId: styleItems('fills', 'fill'), borderId: styleItems('borders', 'border') };
+  function styleDefinition(id, coverage) {
+    function reference(items, value, kind) {
+      if (!/^[0-9]+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || !items[Number(value)]) {
+        coverage.push(issue('spreadsheet-style-reference-missing', stylePart ?? main, { kind, id: value })); return;
+      }
+      return items[Number(value)];
+    }
+    const node = reference(styles, id, 'cellXf'); if (!node) return { id };
+    const baseId = attr(node, 'xfId'), base = baseId === undefined ? undefined : reference(baseStyles, baseId, 'cellStyleXf');
+    const dependencies = [];
+    for (const [kind, items] of Object.entries(resources)) {
+      for (const value of new Set([attr(node, kind), attr(base, kind)].filter(v => v !== undefined))) {
+        const resource = reference(items, value, kind); if (resource) dependencies.push({ kind, id: value, properties: rawProperties(resource) });
+      }
+    }
+    return { id, definition: plainAttrs(node), properties: rawProperties(node),
+      ...(base ? { baseStyle: { id: baseId, properties: rawProperties(base) } } : {}), resources: dependencies };
+  }
   const formats = stylesRoot ? descendants(stylesRoot, 's', 'numFmt').map(plainAttrs) : [];
   let sheetIndex = 0;
   for (const sheet of descendants(root, 's', 'sheet')) {
     const sheetRel = rels.get(attr(sheet, 'id', 'r')); if (!sheetRel?.part || !relationshipType(sheetRel.type, 'worksheet')) fail('document_worksheet_relationship_invalid');
     const part = sheetRel.part, tree = xml(parts, part); if (!is(tree, 's', 'worksheet')) fail('document_worksheet_root_invalid');
     const coverage = [...base], sr = relationships(parts, part, coverage); unsupportedRelations(sr, coverage, part, ['image', 'drawing']);
+    for (const kind of ['conditionalFormatting', 'tableParts', 'autoFilter', 'extLst']) if (children(tree, 's', kind).length) coverage.push(issue('spreadsheet-' + kind + '-not-evaluated', part));
     const cells = [], seen = new Set();
     for (const n of descendants(tree, 's', 'c')) {
       const ref = attr(n, 'r'), pos = cellPosition(ref); if (seen.has(ref)) fail('document_cell_duplicate'); seen.add(ref);
       const type = attr(n, 't') ?? 'n', v = child(n, 's', 'v'), f = child(n, 's', 'f');
-      let value = v ? nodeText(v) : undefined;
-      if (type === 's') { const index = Number(value); if (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(index) || shared[index] === undefined) fail('document_shared_string_invalid'); value = shared[index]; }
-      if (type === 'inlineStr') value = descendants(child(n, 's', 'is') ?? { children: [] }, 's', 't').map(nodeText).join('');
-      cells.push({ ref, ...pos, type, styleId: attr(n, 's'), ...(f ? { formula: { text: nodeText(f), ...plainAttrs(f) }, cachedValue: value } : { value }) });
+      let value = v ? nodeText(v) : undefined, richText;
+      if (type === 's') { const index = Number(value); if (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(index) || shared[index] === undefined) fail('document_shared_string_invalid'); value = shared[index].text; richText = shared[index].properties; }
+      if (type === 'inlineStr') { const inline = sheetString(child(n, 's', 'is')); value = inline?.text ?? ''; richText = inline?.properties; }
+      cells.push({ ref, ...pos, type, styleId: attr(n, 's'), ...(richText ? { richText } : {}), ...(f ? { formula: { text: nodeText(f), ...plainAttrs(f) }, cachedValue: value } : { value }) });
     }
     const merges = descendants(tree, 's', 'mergeCell').map(n => ({ ref: attr(n, 'ref'), bounds: parseRange(attr(n, 'ref')) }));
     const rows = descendants(tree, 's', 'row').map(plainAttrs), columns = descendants(tree, 's', 'col').map(plainAttrs), images = [];
@@ -347,10 +455,15 @@ function spreadsheet(parts, main, mime, units, totalCoverage) {
     if (!buckets.size) bucket(1, 1);
     function emit(bounds) {
       const selected = cells.filter(c => c.row >= bounds.r1 && c.row <= bounds.r2 && c.column >= bounds.c1 && c.column <= bounds.c2);
+      const selectedRows = rows.filter(r => Number(r.r) >= bounds.r1 && Number(r.r) <= bounds.r2);
+      const selectedColumns = columns.filter(c => Number(c.min) <= bounds.c2 && Number(c.max) >= bounds.c1);
+      const unitCoverage = [...coverage];
+      const styleIds = new Set([...selected.map(c => c.styleId ?? (styles.length ? '0' : undefined)), ...selectedRows.map(r => r.s), ...selectedColumns.map(c => c.style)].filter(id => id !== undefined));
       const context = { workbookProperties, dateSystem, dateSerialNote:'Numeric values remain original serials. Apply the specified workbook date system and number format; 1900 serial 60 is the legacy fictitious leap day. No formula recalculation has run.', cells: selected, merges: merges.filter(m => intersects(m.bounds, bounds)),
-        rows: rows.filter(r => Number(r.r) >= bounds.r1 && Number(r.r) <= bounds.r2),
-        columns: columns.filter(c => Number(c.min) <= bounds.c2 && Number(c.max) >= bounds.c1),
-        styles: [...new Set(selected.map(c => c.styleId).filter(s => s !== undefined))].map(id => ({ id, definition: styles[Number(id)] })), numberFormats: formats };
+        rows: selectedRows, columns: selectedColumns, sheetProperties: plainAttrs(sheet),
+        layout: ['sheetFormatPr', 'sheetViews', 'pageMargins', 'pageSetup', 'printOptions'].map(k => rawProperties(child(tree, 's', k))).filter(Boolean),
+        formatting: { resolved: false, note: 'Referenced raw cell/base styles, fonts, fills, borders and rich text. Apply flags, row/column precedence, theme and conditional formatting are not evaluated; no print layout or formula recalculation.' },
+        styles: [...styleIds].map(id => styleDefinition(id, unitCoverage)), numberFormats: formats };
       // Split dense ranges until the native context fits, without truncating cells.
       if (encoder.encode(JSON.stringify(context)).length > 65536) {
         if (bounds.r1 < bounds.r2) { const mid = Math.floor((bounds.r1 + bounds.r2) / 2); emit({ ...bounds, r2: mid }); emit({ ...bounds, r1: mid + 1 }); return; }
@@ -359,7 +472,7 @@ function spreadsheet(parts, main, mime, units, totalCoverage) {
       }
       // Unresolved pixel/cell extents attach to every range so no image is silently lost.
       const relevant = images.filter(im => !im.anchor.to || !im.anchor.bounds || intersects(im.anchor.bounds, bounds));
-      limitedUnit(units, { kind: 'xlsx-range', part, sheetIndex, sheetName: attr(sheet, 'name'), range: rangeName(bounds) }, context, relevant, [...coverage]);
+      limitedUnit(units, { kind: 'xlsx-range', part, sheetIndex, sheetName: attr(sheet, 'name'), range: rangeName(bounds) }, context, relevant, unitCoverage);
     }
     for (const b of [...buckets.values()].sort((a, b) => a.r1 - b.r1 || a.c1 - b.c1)) emit(b);
     totalCoverage.push(...coverage); sheetIndex++;
@@ -380,23 +493,34 @@ function presentation(parts, main, mime, units, totalCoverage) {
     const images = [];
     function shapes(parent, parentPath = []) {
       return parent.children.filter(n => is(n, 'p') && !['nvGrpSpPr', 'grpSpPr', 'extLst'].includes(n.local)).map((n, zOrder) => {
-        const shapePath = [...parentPath, zOrder], transform = descendants(n, 'a', 'xfrm')[0];
+        const shapePath = [...parentPath, zOrder];
+        const shapeProperties = child(n, 'p', is(n, 'p', 'grpSp') ? 'grpSpPr' : 'spPr');
+        const transform = shapeProperties && child(shapeProperties, 'a', 'xfrm');
         function paragraphText(node) {
           if (is(node, 'a', 't')) return nodeText(node);
           if (is(node, 'a', 'br')) return '\n';
           if (is(node, 'a', 'tab')) return '\t';
           return node.children.map(paragraphText).join('');
         }
-        const text = is(n, 'p', 'grpSp') ? [] : descendants(n, 'a', 'p').map(paragraphText);
+        const textBody = child(n, 'p', 'txBody');
+        const paragraphs = textBody ? children(textBody, 'a', 'p') : is(n, 'p', 'grpSp') ? [] : descendants(n, 'a', 'p');
+        const text = paragraphs.map(paragraphText);
         const info = { kind: n.local, zOrder, shapePath, id: attr(descendants(n, 'p', 'cNvPr')[0], 'id'),
-          name: attr(descendants(n, 'p', 'cNvPr')[0], 'name'), transform: geometry(transform), paragraphs: text };
+          name: attr(descendants(n, 'p', 'cNvPr')[0], 'name'), transform: geometry(transform), paragraphs: text,
+          nonVisual: rawProperties(n.children.find(c => is(c, 'p') && c.local.startsWith('nv'))),
+          shapeProperties: rawProperties(shapeProperties), style: rawProperties(child(n, 'p', 'style')),
+          ...(is(n, 'p', 'graphicFrame') ? { tables: descendants(n, 'a', 'tbl').map(rawProperties) } : {}),
+          textLayout: textBody ? { bodyProperties: rawProperties(child(textBody, 'a', 'bodyPr')), listStyle: rawProperties(child(textBody, 'a', 'lstStyle')),
+            paragraphs: paragraphs.map(paragraph => ({ text: paragraphText(paragraph), properties: rawProperties(paragraph) })) } : undefined };
         if (is(n, 'p', 'grpSp')) info.children = shapes(n, shapePath);
         else images.push(...drawingImages(n, sr, parts, mime, { shapePath, zOrder, transform: info.transform }, coverage, part));
         if (!['sp', 'pic', 'grpSp', 'cxnSp'].includes(n.local)) coverage.push(issue('presentation-shape-not-interpreted', part, { kind: n.local, shapePath }));
         return info;
       });
     }
-    limitedUnit(units, { kind: 'pptx-slide', part, slideIndex: slideIndex++ }, { size: plainAttrs(child(root, 'p', 'sldSz')), shapes: shapes(shapeTree) }, images, coverage);
+    limitedUnit(units, { kind: 'pptx-slide', part, slideIndex: slideIndex++ }, { size: plainAttrs(child(root, 'p', 'sldSz')), slideProperties: plainAttrs(tree),
+      background: rawProperties(child(child(tree, 'p', 'cSld') ?? { children: [] }, 'p', 'bg')),
+      formatting: { resolved: false, note: 'Direct shape/text formatting and local geometry only. Theme/master/layout inheritance, group-to-page transforms, font metrics, line wrapping and pixel rendering are not computed.' }, shapes: shapes(shapeTree) }, images, coverage);
     totalCoverage.push(...coverage);
   }
 }

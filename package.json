@@ -56,7 +56,9 @@
     "memory/documents/",
     "test/live-document-fixtures.mjs",
     "memory/test/document-fixtures.mjs",
-    "test/live-document-grounding.mjs"
+    "test/live-document-grounding.mjs",
+    "test/live-flac-grounding.mjs",
+    "test/live-layout-grounding.mjs"
   ],
   "dependencies": {
     "@wasm-audio-decoders/flac": "0.2.11",
