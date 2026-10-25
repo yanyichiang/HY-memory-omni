@@ -9,11 +9,11 @@ if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'images
 if (!process.env.HY_LIVE_OUTPUT) throw Error('Set HY_LIVE_OUTPUT to a new private results directory. This command calls your configured live models.');
 const out = resolve(process.env.HY_LIVE_OUTPUT);
 const reuseFrom = process.env.HY_LIVE_REUSE_FROM;
-if (reuseFrom && !['container-search','images'].includes(profile)) throw Error('Reuse is limited to explicit container-query continuation or the recorded image formation recovery.');
+if (reuseFrom && !['container-search','images','office-rendering'].includes(profile)) throw Error('Reuse is limited to explicit container-query, image recovery, or Office job continuation.');
 await mkdir(out, { mode: 0o700 }); // Never overwrite a first run or reuse its memory.
 const config = await readConfig();
 const report = { profile, startedAt: new Date().toISOString(), revision: process.env.HY_ACCEPTANCE_REVISION || 'working-tree',
-  ...(reuseFrom ? { reuseFrom: resolve(reuseFrom), scope: profile==='images' ? 'Explicit recovery of the first failed image formation; retains successful first observation and embedding.' : 'Query-only continuation; no ingestion/reasoning replay.' } : {}),
+  ...(reuseFrom ? { reuseFrom: resolve(reuseFrom), scope: profile==='office-rendering' ? 'Office continuation retains the original fixture bytes and persisted operation receipts. Unknown recovery requires HY_LIVE_ACCEPT_UNKNOWN=1; production prompts and models are unchanged.' : profile==='images' ? 'Explicit recovery of the first failed image formation; retains successful first observation and embedding.' : 'Query-only continuation; no ingestion/reasoning replay.' } : {}),
   models: Object.fromEntries(Object.entries(config).filter(([k]) => k.endsWith('_MODEL'))),
   semanticReview: { status: 'required', note: 'Inspect first responses against fixture ground truth, including conclusion meaning, native evidence, explicit authority and revision targets. A matching word is not semantic proof.' },
   checks: [], failures: [], calls: 0, finished: false };
@@ -112,13 +112,16 @@ async function knowledgeCases() {
   await save();
 }
 async function waitJob(path, operationId) {
-  for (let i = 0; i < 600; i++) {
+  let progress, idlePolls=0;
+  while (idlePolls < 600) {
     const status = await api(`/${path}/status`, { operationId });
+    const current=JSON.stringify([status.ref,status.phase,status.cursor,status.units]);
+    if(current!==progress){progress=current;idlePolls=0;}else idlePolls++;
     if (status.state === 'complete') return status;
     if (!['queued','running'].includes(status.state)) throw Error(`Job ${operationId}: ${JSON.stringify(status)}`);
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  throw Error(`Job ${operationId} timed out; retained state can be inspected, no automatic recovery.`);
+  throw Error(`Job ${operationId} made no progress for 600 polls; retained state can be inspected, no automatic recovery.`);
 }
 async function recording(path, mimeType, bytes, seconds) {
   const upload = await api(`/${path}/upload`, { mimeType });
@@ -304,9 +307,16 @@ async function officeRenderingCases(){
   const {officeRenderFixtures}=await import('../memory/test/office-render-fixtures.mjs');
   const documents=[];
   for(const [index,fixture] of officeRenderFixtures().entries()){
+    if(reuseFrom){try{fixture.bytes=await readFile(join(resolve(reuseFrom),fixture.name));}catch(error){if(error.code!=='ENOENT')throw error;}}
     await writeFile(join(out,fixture.name),fixture.bytes,{mode:0o600});
-    const operationId=`office-${index}`;
-    await api('/ingest',{operationId,messageRef:fixture.name,sessionRef:'office-rendering',mimeType:fixture.mimeType,dataBase64:Buffer.from(fixture.bytes).toString('base64')});
+    let operationId=`office-${index}`;
+    const admitted=await api('/ingest',{operationId,messageRef:fixture.name,sessionRef:'office-rendering',mimeType:fixture.mimeType,dataBase64:Buffer.from(fixture.bytes).toString('base64')});
+    if(reuseFrom&&['running','unknown'].includes(admitted.state)){
+      if(process.env.HY_LIVE_ACCEPT_UNKNOWN!=='1')throw Error('Retained Office operation needs explicit HY_LIVE_ACCEPT_UNKNOWN=1 recovery.');
+      const previousOperationId=operationId;operationId+='-explicit-recovery';
+      await api('/document/recover',{previousOperationId,operationId,acceptUnknown:true});
+      report.recoveries??=[];report.recoveries.push({previousOperationId,operationId,reason:'Explicit continuation after the original harness stopped; first responses retained.'});await save();
+    }
     const done=await waitJob('document',operationId),units=(await api('/document/units',{ref:done.ref})).units;
     const pages=units.filter(u=>u.locator.kind==='office-rendered-page');
     check(`${fixture.name} native units and two derived pages published`,pages.length===2&&units.length>pages.length&&done.complete);
