@@ -1,4 +1,4 @@
-// Focused first-answer repair reuses the exact retained rendered unit. The native
+// Focused first-answer repair reuses the retained PDF and provider unit context. The native
 // range is prepared again from the retained workbook; no service ingestion replay.
 import {readFileSync} from 'node:fs';
 import {writeFile,mkdir,appendFile,readFile} from 'node:fs/promises';
@@ -7,15 +7,26 @@ import {resolve,join} from 'node:path';
 import {readConfig} from '../scripts/config.mjs';
 if(!process.env.HY_LIVE_OUTPUT||!process.env.HY_LIVE_REUSE_FROM)throw Error('Set a new private HY_LIVE_OUTPUT and the retained office-rendering HY_LIVE_REUSE_FROM. Real models will be called.');
 const out=resolve(process.env.HY_LIVE_OUTPUT);await mkdir(out,{mode:0o700});
-const config=await readConfig(),report={finished:false,scope:'Production perception, grounding and claim projection on the exact retained rendered Excel page, plus native-unit exclusion locally prepared again from the retained workbook. One observation-backed L2 fixture; no Hy Writer, embedding or service ingestion replay.',checks:[],semanticReview:'required'};
+const config=await readConfig(),report={finished:false,scope:'Production perception, grounding and claim projection using the exact retained Excel PDF and its retained provider unit context, plus native-unit exclusion locally prepared again from the retained workbook. One observation-backed L2 fixture; no Hy Writer, embedding or service ingestion replay.',checks:[],semanticReview:'required'};
 const hook=registerHooks({load(url,ctx,next){if(!url.endsWith('.wasm'))return next(url,ctx);const data=readFileSync(new URL(url)).toString('base64');return{format:'module',source:`export default new WebAssembly.Module(Buffer.from('${data}','base64'));`,shortCircuit:true};}});
 let calls=0;
 try{
- const rows=(await readFile(join(resolve(process.env.HY_LIVE_REUSE_FROM),'api-first-responses.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
- const saved=rows.find(x=>x.path==='/read'&&x.result?.documentUnit?.locator?.kind==='office-rendered-page'&&x.result.documentUnit.locator.format==='xlsx'&&x.result.documentUnit.locator.page===1);
- if(!saved)throw Error('Retained rendered spreadsheet page 1 is absent.');
- const bytes=Buffer.from(saved.result.dataBase64,'base64'),unit=JSON.parse(bytes.toString('utf8'));
- if(unit.derived?.mimeType!=='application/pdf')throw Error('Retained unit does not contain the original rendered PDF.');
+ const rows=(await readFile(join(resolve(process.env.HY_LIVE_REUSE_FROM),'model-first-responses.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+ let metadata;
+ for(const row of rows){
+  const parts=row.request?.input?.contents?.[0]?.parts;
+  if(!parts?.[0]?.text?.startsWith('{'))continue;
+  const candidate=JSON.parse(parts[0].text);
+  if(candidate.sourceLocator?.kind==='office-rendered-page'&&candidate.sourceLocator.format==='xlsx'&&candidate.sourceLocator.page===1){
+   if(parts.filter(p=>p.inlineData).length!==1||!parts.some(p=>p.inlineData?.mimeType==='application/pdf'))throw Error('Retained rendered unit attachment contract changed.');
+   metadata=candidate;break;
+  }
+ }
+ if(!metadata)throw Error('Retained rendered spreadsheet page 1 context is absent.');
+ const pdf=await readFile(join(resolve(process.env.HY_LIVE_REUSE_FROM),'layout.xlsx-page-1.pdf'));
+ if(pdf.subarray(0,5).toString()!=='%PDF-')throw Error('Retained page is not PDF.');
+ const unit={original:metadata.documentOriginal,locator:metadata.sourceLocator,context:metadata.structure,coverage:metadata.coverage,images:[],derived:{mimeType:'application/pdf',dataBase64:pdf.toString('base64')}};
+ const bytes=Buffer.from(JSON.stringify(unit));
  await writeFile(join(out,'unit.json'),bytes,{mode:0o600});
  const {CloudflareMemoryModels}=await import('../memory/dist/models.js');
  const {DOCUMENT_UNIT_MIME,prepareDocument}=await import('../memory/dist/document-media.js');
