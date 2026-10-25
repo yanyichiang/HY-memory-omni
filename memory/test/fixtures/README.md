@@ -25,3 +25,7 @@ These fixtures are generated test media. They contain no user recordings, person
 FFmpeg CLI and AudioToolbox are development fixture tools; no external transcoding process runs in the Worker. AAC decoding does use the separately packaged FFmpeg WASM subset described in [the codec module](../../codecs/aac/README.md). These files validate demux/runtime contracts, not model accuracy. The first attempt to mux an 8 kHz MP3 track failed; the valid AV fixture uses 44.1 kHz. No failed fixture was relabeled as a successful recording.
 
 - `tone-aac-44100.m4a`: 88,949 generated 330 Hz samples at 44.1 kHz. Its millisecond movie-clock edit duration is 2,017 ticks, which is not an integer sample count; verifies legal movie-clock rounding without appending silence.
+
+- `opus-video-clock.webm`: 250 ms synthetic 32x32 blue video at 30000/1001 fps with a generated 440 Hz Opus tone. A 0-50 ms excerpt extends to a non-sample-aligned video frame end, exercising independent 48 kHz PCM crop bounds. Generated with FFmpeg color/sine lavfi sources, libvpx-vp9 and libopus; no user media.
+
+- `indexed-aac.mkv`: eight seconds of generated 32x32 blue H.264 (one keyframe per second) and 440 Hz mono AAC, encoded with FFmpeg lavfi color/sine, libx264 and native AAC. Exceeds one 256-packet cache page to verify exact decoder checkpoint restore and bounded packet page reads for a late excerpt.

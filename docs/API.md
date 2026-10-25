@@ -179,3 +179,9 @@ For a query requiring a rendered Word/Excel page or placement on the same render
 
 
 Rendered XLSX unit context additionally carries `renderedTableTopology`, captured from the same PDF layout pass. Rows are emitted fragments, with one-based worksheet source coordinates, source merge bounds and current layout column spans; text overflow is distinguished from merging. `isPrintTitleRow` is a repeatable title-row role, including its first occurrence. Coverage is partial: cells without preserved source coordinates, including some synthetic headings and column-band continuation blanks, can be omitted; `omittedCellCount` records gaps within captured rows. Missing records do not establish absence. This is derived evidence under the original root, not independent support or a complete source-to-page map. The existing 64 KiB unit-context limit applies.
+
+
+Matroska inspection now establishes a pending source ref before creating internal packet/decoder assets. If admission stops before a valid timeline is recorded, its operation remains `unknown`; repeating the admission does not silently rerun it. `correct` / `reinspect` reject that incomplete source with `video_inspection_incomplete` instead of enqueueing an unusable job. The source remains revocable/deletable; submit a corrected upload as a new operation.
+
+
+Long Matroska video inspection stores internal, revision-bound encoded-packet pages and compressed AAC decoder checkpoints alongside clip assets. Each excerpt uses the inspected index; it does not rescan the entire container or decode the whole AAC soundtrack. Original media remain the evidence authority. Cache pages and checkpoints are derived processing assets, never separate evidence roots, and whole-source rebuild/revoke/delete apply to them through the same revision namespace. Initial inspection still traverses the complete source once.

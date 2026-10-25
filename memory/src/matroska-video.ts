@@ -4,6 +4,7 @@ import { checkMatroska } from './matroska-container.js';
 import { decodeOpusWindow } from './opus-pcm.js';
 import { acquireAudio } from './audio.js';
 import { createAacFrameDecoder } from './aac-pcm.js';
+import { cachedMatroskaIndex, MatroskaCacheReader, MatroskaCacheWriter, type MatroskaIndex } from './matroska-cache.js';
 import type { RangeMedia, VideoTrackRange } from './video.js';
 
 const fail = (code: string): never => { throw new MemoryError(code, 415); };
@@ -45,7 +46,8 @@ async function opened(mime: string, source: RangeMedia) {
   await checkMatroska(source, mime);
   return new Input({ formats: [mime === 'video/webm' ? WEBM : MATROSKA], source: sourceFor(source) });
 }
-async function scan(input: Input, selection?: TimeRange, maxBytes = 8 * 1024 * 1024) {
+async function scan(input: Input, selection?: TimeRange, maxBytes = 8 * 1024 * 1024, cache?: RangeMedia['matroskaCache']) {
+  const writer = cache && !selection ? new MatroskaCacheWriter(cache) : undefined;
   const tracks = await input.getTracks(), videos = tracks.filter(t => t.isVideoTrack()), audios = tracks.filter(t => t.isAudioTrack());
   if (videos.length !== 1 || audios.length > 1 || tracks.length !== videos.length + audios.length) return fail('media_tracks_invalid');
   const infos: TrackInfo[] = [];
@@ -74,11 +76,13 @@ async function scan(input: Input, selection?: TimeRange, maxBytes = 8 * 1024 * 1
       if (!raw || packet.timestamp !== 0) return fail('media_decoder_config_invalid');
       aac = await createAacFrameDecoder(ArrayBuffer.isView(raw) ? new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength) : new Uint8Array(raw));
     } else if (delay !== 0 || firstTiming.seekPreRollNs !== 0) return fail('media_matroska_delay_unsupported');
+    const cacheTrack = await writer?.track(track, codec!, resolution);
     let pendingKey: Sample[] = [];
     try { while (packet) {
       const next = await sink.getNextPacket(packet), m = timing(packet);
       if (m.codecDelayNs !== firstTiming.codecDelayNs || m.seekPreRollNs !== firstTiming.seekPreRollNs || m.trackNumber !== track.id || padded || m.discardPaddingNs < 0) return fail('media_matroska_padding_unsupported');
       if (!packet.data.length || !Number.isFinite(packet.timestamp) || packet.timestamp < 0) return fail('media_packets_invalid');
+      await cacheTrack?.before(packet, aac);
       const decoded = aac?.decode(packet.data);
       if (decoded) {
         rate = decoded.rate; pcmChannels = decoded.channels;
@@ -102,6 +106,7 @@ async function scan(input: Input, selection?: TimeRange, maxBytes = 8 * 1024 * 1
       begin = Math.min(begin, validStart); end = Math.max(end, validEnd); count++;
       previousEnd = start + duration;
       const sample = { packet, start, end: start + duration, ...(samples ? { samples } : {}) };
+      cacheTrack?.append(sample);
       if (selection) {
         if (track.isVideoTrack()) {
           if (packet.type === 'key' && start <= selection.startMs / 1000) { bytes -= pendingKey.reduce((n, s) => n + s.packet.data.length, 0); pendingKey = []; videoStart = start; }
@@ -135,26 +140,98 @@ async function scan(input: Input, selection?: TimeRange, maxBytes = 8 * 1024 * 1
       for (const part of pcmChunks) { data.set(part, at); at += part.length; }
       pcm = { bytes: data, rate, channels: pcmChannels, start: pcmStart, end: pcmEnd };
     }
+    await cacheTrack?.finish(begin, end, count);
     infos.push({ track, codec: codec!, start: begin, end, packets: selected, count, resolution, ...(pcm ? { pcm } : {}) });
   }
   if (Math.min(...infos.map(t => t.start)) !== 0) return fail('media_timeline_origin');
   const timeline = { durationMs: Math.ceil(Math.max(...infos.map(t => t.end)) * 1000), hasAudio: audios.length === 1, hasVideo: true };
+  await writer?.finish(timeline);
   return { infos, timeline };
+}
+/** A completed index belongs to this immutable source revision; no container rescan is needed. */
+async function scanCached(cache: NonNullable<RangeMedia['matroskaCache']>, index: MatroskaIndex, selection: TimeRange, maxBytes: number) {
+  const reader = new MatroskaCacheReader(cache, index), infos: TrackInfo[] = [];
+  let bytes = 0, videoStart = 0, videoEnd = selection.endMs / 1000;
+  const account = (size: number) => { bytes += size; if (bytes > maxBytes) throw new MemoryError('media_slice_too_large', 413); };
+  for (let id = 0; id < index.tracks.length; id++) {
+    const info = index.tracks[id]!, track = reader.track(id), selected: Sample[] = [];
+    let page = await reader.locate(id, info.video ? selection.startMs / 1000 : Math.max(0, videoStart - (info.codec === 'opus' ? info.preroll ?? 0.08 : 0)));
+    if (info.video) {
+      const descriptor = await reader.pageInfo(id, page);
+      if (descriptor.firstKey === undefined || descriptor.firstKey > selection.startMs / 1000) page = descriptor.keyPage;
+    }
+    let decoder: Awaited<ReturnType<typeof createAacFrameDecoder>> | undefined;
+    if (info.codec === 'aac') {
+      // No approximate preroll: resume the exact FFmpeg heap before this page.
+      page = await reader.locate(id, videoStart);
+      const config = await (track.isAudioTrack() ? track.getDecoderConfig() : undefined);
+      if (!config?.description) return fail('media_decoder_config_invalid');
+      const raw = config.description, asc = ArrayBuffer.isView(raw) ? new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength) : new Uint8Array(raw);
+      decoder = await createAacFrameDecoder(asc, await reader.checkpoint(id, page));
+    }
+    const chunks: Uint8Array[] = [];
+    let pcmStart = Infinity, pcmEnd = 0, rate = 0, channels = 0, done = false;
+    try {
+      for (; page < info.pages && !done; page++) {
+        for (const sample of await reader.packets(id, page)) {
+          if (sample.start >= (info.video ? selection.endMs / 1000 : videoEnd)) { done = true; break; }
+          if (info.video) {
+            if (sample.packet.type === 'key' && sample.start <= selection.startMs / 1000) {
+              bytes -= selected.reduce((n, p) => n + p.packet.data.length, 0); selected.length = 0; videoStart = sample.start;
+            }
+            account(sample.packet.data.length); selected.push(sample);
+          } else if (decoder) {
+            const decoded = decoder.decode(sample.packet.data); rate = decoded.rate; channels = decoded.channels;
+            if (decoded.samples !== sample.samples) return fail('media_matroska_cache_invalid');
+            const first = Math.max(0, Math.ceil((videoStart - sample.start) * rate - 1e-6));
+            const last = Math.min(decoded.samples, Math.floor((Math.min(videoEnd, info.end, sample.end) - sample.start) * rate + 1e-6));
+            if (last > first) {
+              const size = (last - first) * channels * 4; account(size);
+              const chunk = new Uint8Array(size), view = new DataView(chunk.buffer);
+              for (let i = first * channels; i < last * channels; i++) view.setFloat32((i - first * channels) * 4, decoded.data[i]!, true);
+              chunks.push(chunk); pcmStart = Math.min(pcmStart, sample.start + first / rate); pcmEnd = sample.start + last / rate; selected.push(sample);
+            }
+          } else {
+            const preroll = info.codec === 'opus' ? Math.max(0.08, timing(sample.packet).seekPreRollNs / 1e9) : 0;
+            if (videoStart === 0 || sample.end > Math.max(0, videoStart - preroll)) { account(sample.packet.data.length); selected.push(sample); }
+          }
+        }
+      }
+    } finally { decoder?.free(); }
+    let pcm: TrackInfo['pcm'];
+    if (chunks.length) {
+      const data = new Uint8Array(chunks.reduce((n, p) => n + p.length, 0)); let at = 0;
+      for (const chunk of chunks) { data.set(chunk, at); at += chunk.length; }
+      pcm = { bytes: data, rate, channels, start: pcmStart, end: pcmEnd };
+    }
+    if (info.video) {
+      if (!selected.length || selected[0]!.packet.type !== 'key') return fail('media_packets_invalid');
+      videoEnd = Math.max(videoEnd, selected.at(-1)!.end);
+    }
+    infos.push({ ...info, track, packets: selected, ...(pcm ? { pcm } : {}) });
+  }
+  return { infos, timeline: index.timeline };
 }
 export async function inspectMatroskaVideo(mime: string, source: RangeMedia): Promise<Timeline> {
   const input = await opened(mime, source);
   let release: (() => void) | undefined;
-  try { release = await acquireAudio(); return (await scan(input)).timeline; }
+  try { release = await acquireAudio(); return (await scan(input, undefined, undefined, source.matroskaCache)).timeline; }
   catch (error) { if (error instanceof MemoryError) throw error; return fail('media_container_invalid'); }
   finally { input.dispose(); release?.(); }
 }
 export async function sliceMatroskaVideo(mime: string, source: RangeMedia, logical: TimeRange, maxBytes = 8 * 1024 * 1024) {
   if (!logical || !Number.isFinite(logical.startMs) || !Number.isFinite(logical.endMs) || logical.startMs < 0 || logical.endMs <= logical.startMs) throw new MemoryError('media_time_range_invalid', 400);
-  const input = await opened(mime, source);
+  let input: Input | undefined;
+  let index = source.matroskaCache && await cachedMatroskaIndex(source.matroskaCache);
+  if (source.matroskaCache && !index) {
+    await inspectMatroskaVideo(mime, source);
+    index = await cachedMatroskaIndex(source.matroskaCache);
+  }
+  if (!index) input = await opened(mime, source);
   let release: (() => void) | undefined;
   try {
     release = await acquireAudio();
-    const { infos, timeline: sourceTimeline } = await scan(input, logical, maxBytes);
+    const { infos, timeline: sourceTimeline } = index && source.matroskaCache ? await scanCached(source.matroskaCache, index, logical, maxBytes) : await scan(input!, logical, maxBytes);
     if (logical.endMs > sourceTimeline.durationMs) throw new MemoryError('media_time_range_invalid', 400);
     const video = infos[0]!;
     const origin = logical.startMs === 0 ? 0 : Math.min(video.packets[0]!.start, ...infos.slice(1).filter(i => !['opus', 'aac'].includes(i.codec)).map(i => i.packets[0]!.start));
@@ -179,7 +256,10 @@ export async function sliceMatroskaVideo(mime: string, source: RangeMedia, logic
           output.addAudioTrack(encoded, { decoderConfig: pcmConfig });
           pumps.push(async () => { await encoded.add(new EncodedPacket(pcm.bytes, 'key', start - origin, end - start), { decoderConfig: pcmConfig }); encoded.close(); });
         } else if (codec === 'opus') {
-          start = Math.max(origin, info.start); end = Math.min(info.end, videoEnd);
+          // Video frame boundaries need not lie on the independent 48 kHz audio clock.
+          // Crop inward to complete samples, and use those same bounds for PCM and mapping.
+          start = Math.ceil(Math.max(origin, info.start) * 48000 - 1e-6) / 48000;
+          end = Math.floor(Math.min(info.end, videoEnd) * 48000 + 1e-6) / 48000;
           const raw = config.description!;
           const head = ArrayBuffer.isView(raw) ? new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength) : new Uint8Array(raw);
           const remaining = maxBytes - video.packets.reduce((n, p) => n + p.packet.data.length, 0) - 65536;
@@ -209,5 +289,5 @@ export async function sliceMatroskaVideo(mime: string, source: RangeMedia, logic
     return { bytes, mimeType: 'video/quicktime', logical, actual, offsetMs: actual.startMs, tracks,
       timeline: { durationMs: Math.ceil(actual.endMs - actual.startMs), hasVideo: true, hasAudio: sourceTimeline.hasAudio }, sourceTimeline };
   } catch (error) { if (error instanceof MemoryError) throw error; return fail('media_container_invalid'); }
-  finally { input.dispose(); release?.(); }
+  finally { input?.dispose(); release?.(); }
 }

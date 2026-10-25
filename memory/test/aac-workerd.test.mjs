@@ -75,3 +75,53 @@ test('AAC LC / HE / HEv2 decode in workerd with presentation-time priming/tail t
     }
   } finally { await mf.dispose(); }
 });
+
+test('AAC checkpoints restore LC, SBR and PS history byte identically in a fresh workerd Wasm instance', async () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const entry = `import {createAacFrameDecoder} from './src/aac-pcm.ts';
+    export default {async fetch(request){let continuous,restored;try{
+      const bytes=new Uint8Array(await request.arrayBuffer()),point=+new URL(request.url).searchParams.get('point');
+      const frequency=(bytes[2]>>2)&15,channel=((bytes[2]&1)<<2)|(bytes[3]>>6),object=(bytes[2]>>6)+1;
+      const asc=new Uint8Array([(object<<3)|(frequency>>1),((frequency&1)<<7)|(channel<<3)]),packets=[];
+      for(let at=0;at<bytes.length;){
+        const length=((bytes[at+3]&3)<<11)|(bytes[at+4]<<3)|(bytes[at+5]>>5);
+        if(!(bytes[at]===255&&(bytes[at+1]&246)===240&&(bytes[at+1]&1)&&length>=7&&at+length<=bytes.length))throw Error('invalid_adts');
+        packets.push(bytes.slice(at+7,at+length));at+=length;
+      }
+      continuous=await createAacFrameDecoder(asc);
+      let checkpoint,expected=[],rate,channels;
+      for(let i=0;i<packets.length;i++){
+        const frame=continuous.decode(packets[i]);rate=frame.rate;channels=frame.channels;
+        if(i===point)checkpoint=continuous.checkpoint();
+        if(i>point)expected.push(new Uint8Array(frame.data.buffer,frame.data.byteOffset,frame.data.byteLength).slice());
+      }
+      continuous.free();continuous=undefined;
+      restored=await createAacFrameDecoder(asc,checkpoint);
+      let identical=true;
+      for(let i=point+1;i<packets.length;i++){
+        const frame=restored.decode(packets[i]),actual=new Uint8Array(frame.data.buffer,frame.data.byteOffset,frame.data.byteLength),want=expected[i-point-1];
+        identical&&=frame.rate===rate&&frame.channels===channels&&actual.length===want.length&&actual.every((value,j)=>value===want[j]);
+      }
+      const damaged=checkpoint.slice();damaged[0]^=1;let rejected=false;
+      try{await createAacFrameDecoder(asc,damaged)}catch(e){rejected=e.code==='audio_aac_checkpoint_invalid'}
+      return Response.json({identical,rejected,compared:expected.length,checkpointBytes:checkpoint.length});
+    }catch(e){return Response.json({error:e.message},{status:415})}finally{continuous?.free();restored?.free()}}};`;
+  const result = await build({absWorkingDir:root,stdin:{contents:entry,resolveDir:root,sourcefile:'aac-checkpoint-test.js'},
+    bundle:true,write:false,format:'esm',platform:'browser',target:'es2022',external:['cloudflare:workers'],
+    plugins:[{name:'static-wasm',setup(b){b.onResolve({filter:/\.wasm$/},args=>({path:'./'+args.path.split('/').at(-1),external:true}));}}]});
+  const mf = new Miniflare({workers:[{config:{name:'aac-checkpoint-test',compatibilityDate:'2026-10-19',manifest:{mainModule:'entry.js',modules:{
+    'entry.js':{type:'esm',contents:result.outputFiles[0].text},
+    'aac-decoder.wasm':{type:'wasm',contents:await readFile(new URL('../codecs/aac/aac-decoder.wasm',import.meta.url))},
+  }}}}]});
+  try {
+    for (const file of ['tone.aac','tone-he.aac','tone-he-v2.aac']) {
+      const bytes=await readFile(new URL('fixtures/'+file,import.meta.url));
+      for(const point of [0,7,31]) {
+        const r=await mf.dispatchFetch('http://test/?point='+point,{method:'POST',body:bytes});
+        assert.equal(r.status,200,file+': '+await r.clone().text());
+        const result=await r.json();assert.equal(result.identical,true,file+' packet '+point);
+        assert.equal(result.rejected,true);assert.ok(result.compared>10);assert.ok(result.checkpointBytes<=64*1024*1024+65568);
+      }
+    }
+  } finally {await mf.dispose();}
+});

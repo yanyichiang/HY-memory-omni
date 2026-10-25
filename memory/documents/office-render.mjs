@@ -27,6 +27,45 @@ function canonicalXml(root){
  return encoder.encode(emit(root,true));
 }
 const attribute=(n,key)=>n.attributes.find(a=>a.local===key)?.value;
+// Geometry is identified by the OOXML element AND its attribute namespace.
+// A numeric color, revision ID or foreign lookalike is not a measurement.
+function geometryLimit(node,attr){
+ const uri=transitional(node.uri),attributeUri=transitional(attr.uri);
+ const word='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+ const sheet='http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+ const drawing='http://schemas.openxmlformats.org/drawingml/2006/main';
+ if(uri===word&&attributeUri===word){
+  if(['sz','szCs'].includes(node.local)&&attr.local==='val')return 288;
+  const dimensions={pgSz:['w','h'],pgMar:['top','right','bottom','left','header','footer','gutter'],
+   gridCol:['w'],tblW:['w'],tcW:['w'],tblInd:['w'],trHeight:['val'],
+   spacing:['before','after','line'],ind:['left','right','start','end','firstLine','hanging'],
+   position:['val'],kern:['val'],tab:['pos'],col:['w','space'],cols:['space'],
+   top:['w','sz','space'],bottom:['w','sz','space'],left:['w','sz','space'],right:['w','sz','space'],
+   start:['w','sz','space'],end:['w','sz','space'],insideH:['sz','space'],insideV:['sz','space']};
+  if(dimensions[node.local]?.includes(attr.local))return 60000;
+ }
+ if(uri===sheet&&!attributeUri){
+  if(node.local==='sz'&&attr.local==='val')return 288;
+  if(node.local==='col'&&attr.local==='width')return 255;
+  if(node.local==='row'&&attr.local==='ht')return 409;
+  if(node.local==='sheetFormatPr'&&attr.local==='defaultRowHeight')return 409;
+  if(node.local==='sheetFormatPr'&&['defaultColWidth','baseColWidth'].includes(attr.local))return 255;
+  if(node.local==='pageMargins'&&['left','right','top','bottom','header','footer'].includes(attr.local))return 60000;
+ }
+ if(!attributeUri){
+  if(uri===drawing){
+   if(['ext','chExt'].includes(node.local)&&['cx','cy'].includes(attr.local)
+    ||['off','chOff'].includes(node.local)&&['x','y'].includes(attr.local)
+    ||node.local==='ln'&&attr.local==='w')return 60000000;
+   if(['rPr','defRPr','endParaRPr'].includes(node.local)&&attr.local==='sz')return 28800;
+  }
+  if(['http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
+   'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'].includes(uri)
+   &&['extent','ext'].includes(node.local)&&['cx','cy'].includes(attr.local))return 60000000;
+ }
+ return undefined;
+}
+
 function position(ref){
   const m=/^\$?([A-Z]{1,3})\$?([1-9][0-9]{0,6})$/.exec(ref);if(!m)fail('office_render_range_unsupported');
   let col=0;for(const c of m[1])col=col*26+c.charCodeAt(0)-64;
@@ -103,15 +142,13 @@ export function preflightOffice(bytes){
           if(a.value.length>4096)fail('office_render_attribute_budget_exceeded');
           if((['gridSpan','colSpan','rowSpan'].includes(a.local)||n.local==='gridSpan'&&a.local==='val')&&(!/^\d+$/.test(a.value)||Number(a.value)>128))fail('office_render_table_span_budget_exceeded');
           if(n.local==='col'&&['min','max'].includes(a.local)&&(!/^\d+$/.test(a.value)||Number(a.value)>16384))fail('office_render_column_budget_exceeded');
-          if(['w','h','cx','cy','sz','ht','width','height','val','defaultRowHeight','defaultColWidth'].includes(a.local)&&/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(a.value)){
-            const v=Number(a.value);let limit=['cx','cy'].includes(a.local)?60000000:60000;
-            if(['sz','szCs','fontSize'].includes(n.local))limit=288;
-            if(n.local==='col'&&a.local==='width')limit=255;
-            if(n.local==='row'&&a.local==='ht')limit=409;
+          const limit=geometryLimit(n,a);
+          if(limit!==undefined&&/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(a.value)){
+            const v=Number(a.value);
             if(!Number.isFinite(v)||Math.abs(v)>limit)fail('office_render_geometry_budget_exceeded');
           }
         }
-        if(n.local==='pgSz')for(const key of ['w','h']){const v=Number(attribute(n,key));if(!Number.isFinite(v)||v<1440||v>31680)fail('office_render_page_geometry_unsupported');}
+        if(transitional(n.uri)==='http://schemas.openxmlformats.org/wordprocessingml/2006/main'&&n.local==='pgSz')for(const key of ['w','h']){const v=Number(n.attributes.find(a=>transitional(a.uri)==='http://schemas.openxmlformats.org/wordprocessingml/2006/main'&&a.local===key)?.value);if(!Number.isFinite(v)||v<1440||v>31680)fail('office_render_page_geometry_unsupported');}
         n.children.forEach(walk);
       }
       walk(root);renderParts[path]=canonicalXml(root);

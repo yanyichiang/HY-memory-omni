@@ -1,11 +1,12 @@
 // Explicit live-provider test. Uses production main.py and the authenticated gateway.
 import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { readConfig } from '../scripts/config.mjs';
 import { createRuntime } from '../scripts/runtime.mjs';
 
 const profile = process.env.HY_LIVE_PROFILE || 'all';
-if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'images', 'documents', 'office-rendering', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats, containers, container-search, images, documents, office-rendering or all.');
+if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'images', 'documents', 'office-rendering', 'office-consumer', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats, containers, container-search, images, documents, office-rendering, office-consumer or all.');
 if (!process.env.HY_LIVE_OUTPUT) throw Error('Set HY_LIVE_OUTPUT to a new private results directory. This command calls your configured live models.');
 const out = resolve(process.env.HY_LIVE_OUTPUT);
 const reuseFrom = process.env.HY_LIVE_REUSE_FROM;
@@ -305,6 +306,54 @@ async function documentCases(){
   check('revoked roots and units are invalid',!(await api('/validate',{refs:documents.flatMap(d=>[d.ref,...d.units.map(u=>u.ref)])})).valid);
   await save();
 }
+async function officeConsumerCases() {
+  if (!process.env.HY_LIVE_OAN_DIST) throw Error('Set HY_LIVE_OAN_DIST to the built OAN cf-runtime dist directory.');
+  const {MemoryClient} = await import(pathToFileURL(join(resolve(process.env.HY_LIVE_OAN_DIST), 'memory-client.js')));
+  const {memoryToolOutput} = await import(pathToFileURL(join(resolve(process.env.HY_LIVE_OAN_DIST), 'synthetic-models.js')));
+  const principal = {ownerRef: config.HY_OWNER_REF, scopeRef: 'personal'};
+  // Actual OAN consumer and standalone authenticated gateway; only transport/auth
+  // adapts the service binding. Bodies and responses are neither repaired nor mocked.
+  const client = new MemoryClient({MEMORY_PRINCIPAL: JSON.stringify(principal), MEMORY: {async fetch(request) {
+    const body = await request.json();
+    if (JSON.stringify(body.principal) !== JSON.stringify(principal)) throw Error('Consumer principal changed.');
+    const response = await runtime.dispatchFetch(`https://acceptance.test${new URL(request.url).pathname}`, {
+      method: 'POST', headers: {Authorization: `Bearer ${config.HY_API_TOKEN}`, 'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    await appendFile(join(out, 'consumer-first-responses.jsonl'), JSON.stringify({path: new URL(request.url).pathname, status: response.status, result: redact(await response.clone().json())}) + '\n', {mode: 0o600});
+    return response;
+  }}});
+  const {officeRenderFixtures} = await import('../memory/test/office-render-fixtures.mjs');
+  const fixture = officeRenderFixtures().find(f => f.name === 'layout.xlsx');
+  await writeFile(join(out, fixture.name), fixture.bytes, {mode: 0o600});
+  const operationId = 'office-consumer-xlsx';
+  const admitted = await client.ownerCommand('ingest', {mimeType: fixture.mimeType, dataBase64: Buffer.from(fixture.bytes).toString('base64')}, {operationId, messageRef: fixture.name, sessionRef: 'office-consumer'});
+  const done = await waitJob('document', operationId);
+  check('OAN admission preserves document receipt', admitted.ref.sourceId === done.ref.sourceId && (await client.documentStatus({ref: done.ref, operationId})).state === 'complete');
+  const {units} = await client.documentUnits({ref: done.ref});
+  check('native range and two rendered pages published', units.length === 3 && units.filter(u => u.locator.kind === 'office-rendered-page').length === 2);
+  check('OAN Owner original bytes preserved', Buffer.from((await client.readOriginal({ref: done.ref})).dataBase64, 'base64').equals(Buffer.from(fixture.bytes)));
+  for (const page of units.filter(u => u.locator.kind === 'office-rendered-page')) {
+    const raw = await client.readOriginal({ref: page.ref});
+    const packed = JSON.parse(Buffer.from(raw.dataBase64, 'base64').toString());
+    await writeFile(join(out, `${fixture.name}-page-${page.locator.page}.pdf`), Buffer.from(packed.derived.dataBase64, 'base64'), {mode: 0o600});
+    const projected = memoryToolOutput(await client.read({ref: page.ref}));
+    check(`page ${page.locator.page} same-root evidence reaches OAN model projection`, raw.provenance.roots.length === 1 && raw.provenance.roots[0] === done.ref.sourceId && projected.text.includes('same-pdf-layout-pass') && !projected.text.includes('dataBase64'));
+  }
+  const queries = [
+    {name: 'merged bottom row supported', query: 'Find the rendered spreadsheet page with three table rows in total including its header, and 合并单元格 in a single full-width bottom cell with no vertical divider splitting that bottom row.', page: 1},
+    {name: 'invented separate empty bottom-right cell rejected', query: 'Find a rendered spreadsheet page whose bottom row has two separate cells divided by a visible vertical border, with 合并单元格 on the left and an empty cell on the right.', page: null},
+  ];
+  for (const q of queries) {
+    const result = await client.search({query: q.query, limit: 20}, 'office-consumer-search');
+    const evidence = result.items.flatMap(item => item.documentEvidence ?? []);
+    check(q.name, q.page === null ? evidence.length === 0 : evidence.length > 0 && evidence.every(e => e.original.sourceId === done.ref.sourceId && e.basis === 'rendered-document-page' && e.locator.page === q.page), evidence);
+    await client.validate(result.items.flatMap(item => item.refs), result.revision, result.knowledge?.validUntil);
+    check(`${q.name}: OAN validates current references`, true);
+  }
+  report.knowledge = await client.knowledgePage({sourceIds: units.map(u => u.ref.sourceId)});
+  report.consumer = {entry: 'OAN MemoryClient + memoryToolOutput', transport: 'authenticated standalone gateway', original: done.ref, units};
+  await save();
+}
+
 async function officeRenderingCases(){
   const {officeRenderFixtures}=await import('../memory/test/office-render-fixtures.mjs');
   const documents=[];
@@ -374,6 +423,7 @@ try {
   if (profile === 'images') await imageFormatCases();
   if (profile === 'documents') await documentCases();
   if (profile === 'office-rendering') await officeRenderingCases();
+  if (profile === 'office-consumer') await officeConsumerCases();
   report.finished = true;
 } catch (error) {
   report.failures.push(error.message); report.error = error.message;
