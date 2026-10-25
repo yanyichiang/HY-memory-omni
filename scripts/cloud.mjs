@@ -48,7 +48,7 @@ export function renderCloud(installation, config) {
     services: [{ binding: 'MEMORY_READ', service: `${i.name}-store`, entrypoint: 'MemoryReadAPI' }],
     vars: Object.fromEntries(['HY_LLM_URL', 'HY_LLM_MODEL', 'HY_EMBED_URL', 'HY_EMBED_MODEL', 'HY_EMBED_DIMS'].map(k => [k, config[k]])) };
   const store = { ...common, name: `${i.name}-store`, main: resolve(repository, 'memory/src/worker.ts'),
-    build: { command: 'node scripts/prepare-mp3.mjs', cwd: resolve(repository, 'memory') },
+    build: { command: 'node scripts/prepare-codecs.mjs', cwd: resolve(repository, 'memory') },
     find_additional_modules: true, rules: [{ type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: true }],
     durable_objects: { bindings: [{ name: 'MEMORY', class_name: 'MemoryObject' }] }, migrations: [{ tag: 'hy-media-v1', new_sqlite_classes: ['MemoryObject'] }],
     r2_buckets: [{ binding: 'ORIGINALS', bucket_name: `${i.name}-originals` }], services: [{ binding: 'HY_ENGINE', service: engine.name }],

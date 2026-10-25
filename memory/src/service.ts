@@ -73,7 +73,7 @@ export function sourceRef(value: unknown): SourceRef {
 }
 function mediaType(value: unknown): string {
   const type = text(value, 80);
-  if (!['image/png', 'image/jpeg', 'image/webp', 'audio/wav', 'audio/mpeg', 'video/mp4', 'video/quicktime'].includes(type)) throw new MemoryError('unsupported_media', 415);
+  if (!['image/png', 'image/jpeg', 'image/webp', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac', 'video/mp4', 'video/quicktime'].includes(type)) throw new MemoryError('unsupported_media', 415);
   return type;
 }
 export function timeRange(value: unknown, timeline: Timeline): TimeRange {

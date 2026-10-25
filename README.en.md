@@ -266,7 +266,8 @@ npm pack
 - Retrieval returns a bounded candidate set. No hit does not prove that relevant evidence is absent; grouping segments by video also does not mean cross-segment reasoning has reached a conclusion.
 - Cross-clip reasoning event timestamps are model estimates and may be inaccurate even when the conclusion is correct. New events identify this basis and the supplied media window; inspect native evidence through the archived `clipRef`.
 - The current editing unit is a **whole-source rebuild**. Individual fact editing is not yet available.
-- Ordinary media ingestion accepts original files up to 8 MiB; audio lasts at most 180 seconds and short video at most 120 seconds. Media queries accept original files up to 2 MiB. Long videos use the job API; long audio uses its own multipart task API with fixed/dynamic segmentation, grouping and explicit cross-clip reasoning. See [compatibility](docs/MEDIA.md). See [API documentation](docs/API.md) for formats and errors.
+- Audio supports PCM WAV, MP3, M4A / ADTS AAC-LC, HE-AAC and HE-AACv2, Ogg Opus, and native FLAC. AAC / Opus accept mono or stereo; FLAC preserves up to eight channels. Originals are retained; the new compressed formats use float32 WAV derivatives for understanding, media queries and embedding. Small derivatives must fit 8 MiB, and long-audio excerpts 4 MiB; use multipart ingestion when the inline bound is exceeded. See [compatibility](docs/MEDIA.md) for timing and rejection rules. Live calls passed M4A ingestion, Opus/AAC queries and the rebuild/revocation lifecycle; one FLAC query false negative remains in the [acceptance record](docs/ACCEPTANCE.md).
+- Ordinary media ingestion accepts original files up to 8 MiB; audio lasts at most 180 seconds and short video at most 120 seconds. Media queries accept original files up to 2 MiB. Long videos use the job API; long audio uses its own multipart task API with fixed/dynamic segmentation, grouping and explicit cross-clip reasoning. Run `npm run inspect -- FILE` to check an export first; see [compatibility](docs/MEDIA.md) and [API documentation](docs/API.md) for formats and errors.
 
 ## Documentation and Contributions
 
@@ -281,7 +282,7 @@ When reporting an issue, include the version, minimal reproduction steps, and re
 
 Original code and documentation are released by **YY** under [Apache-2.0](LICENSE). Thanks to [Tencent Hy-Memory](https://github.com/Tencent-Hunyuan/Hy-Memory) for the memory engine. Original attribution and licensing are preserved in [NOTICE](NOTICE) and [UPSTREAM-LICENSE](engine/UPSTREAM-LICENSE). This is an independent derivative project, without official Tencent endorsement or product affiliation.
 
-Mediabunny, MP3 decoding components, and Python dependencies retain their respective MPL / LGPL / MIT and other licenses. See [third-party license notices](THIRD_PARTY_NOTICES.md). Current distribution contains source code; redistribution of precompiled WASM, containers, or complete runtime environments must meet the obligations of the included components.
+Mediabunny, audio decoding components, and Python dependencies retain their respective MPL / LGPL / MIT and other licenses. See [third-party license notices](THIRD_PARTY_NOTICES.md). Distribution contains application source and an independently replaceable AAC WASM module, with complete corresponding source, build script and licenses; other decoders are generated from locked dependencies. Redistributing a complete runtime must retain the included components’ notices.
 
 
 

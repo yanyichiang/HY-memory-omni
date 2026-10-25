@@ -30,6 +30,7 @@
     "gateway/",
     "memory/src/",
     "memory/scripts/",
+    "memory/codecs/",
     "memory/build.mjs",
     "memory/licenses/",
     "memory/wrangler.jsonc",
@@ -53,10 +54,12 @@
     "npm-shrinkwrap.json"
   ],
   "dependencies": {
+    "@wasm-audio-decoders/flac": "0.2.11",
     "esbuild": "0.28.1",
     "miniflare": "5.20261012.0-beta",
     "mediabunny": "1.62.1",
     "mpg123-decoder": "1.0.3",
+    "opus-decoder": "0.7.12",
     "wrangler": "4.151.0"
   },
   "devDependencies": {

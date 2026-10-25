@@ -266,6 +266,7 @@ npm pack
 - 检索返回有界候选集合。没有命中不能证明相关证据不存在；按视频归组也不等于跨片段推理已经得出结论。
 - 跨片段推理事件的时间戳是模型估计；即使结论正确，定位也可能有偏差。新事件标注估时与供模窗口，原件核验使用归档的 `clipRef`。
 - 当前修改粒度是**整个来源重建**，尚未提供单条事实编辑。
+- 音频支持 PCM WAV、MP3、M4A / ADTS 的 AAC-LC、HE-AAC、HE-AACv2、Ogg Opus 和原生 FLAC。AAC / Opus 支持单、双声道，FLAC 保留最多 8 声道；原件保留，新增压缩格式在理解、媒体查询与 embedding 前派生 float32 WAV。小媒体派生上限 8 MiB，长音频每片上限 4 MiB；超限使用 multipart。具体时钟与拒绝条件见[兼容性说明](docs/MEDIA.md)。真实调用已通过 M4A 入库、Opus/AAC 查询及重建撤销；FLAC 查询保留一例漏检，详见[验收记录](docs/ACCEPTANCE.md)。
 - 普通媒体写入上限为原文件 8 MiB；音频最长 180 秒、短视频最长 120 秒；媒体查询上限为原文件 2 MiB。长视频和长音频使用各自的任务接口，支持固定/动态切分、按原件分组和显式跨片推理。`npm run inspect -- FILE` 可先检查格式；见[兼容性说明](docs/MEDIA.md)与 [API 文档](docs/API.md)。
 
 ## 文档与贡献
@@ -281,7 +282,7 @@ npm pack
 
 原创代码与文档由 **YY** 以 [Apache-2.0](LICENSE) 发布。感谢 [Tencent Hy-Memory](https://github.com/Tencent-Hunyuan/Hy-Memory) 提供记忆内核；原始署名与许可证保留在 [NOTICE](NOTICE) 和 [UPSTREAM-LICENSE](engine/UPSTREAM-LICENSE)。本项目为独立衍生项目，不代表腾讯官方产品或背书。
 
-Mediabunny、MP3 解码组件及 Python 依赖保留各自的 MPL / LGPL / MIT 等许可证，详见 [第三方许可证说明](THIRD_PARTY_NOTICES.md)。当前分发内容为源码；预编译 WASM、容器或完整运行环境的再分发需要遵守所含组件的对应义务。
+Mediabunny、音频解码组件及 Python 依赖保留各自的 MPL / LGPL / MIT 等许可证，详见 [第三方许可证说明](THIRD_PARTY_NOTICES.md)。当前分发包含应用源码及可独立替换的 AAC WASM 模块，随附完整对应源码、构建脚本与许可证；其他解码器由锁定依赖生成。再分发完整运行环境时仍需保留所含组件的对应声明。
 
 
 

@@ -8,8 +8,15 @@ These fixtures are generated test media. They contain no user recordings, person
 - `synthetic-blue-600s.mp4`: ten-minute, 1 fps, 32×32 blue video for long-container indexing.
 - `synthetic-meeting-m42.mp4`: 28.171-second scripted synthetic M42 meeting: propose Friday, object, decide Saturday, explicitly revise to Sunday; no real meeting or participants.
 - `tone.wav`, `tone.mp3`: short generated mono tone audio.
+- `synthetic-extended-48123.wav`, `.opus`, `.flac`: generated 440 Hz mono tone, 48123 input samples at 48 kHz. The WAV is PCM16; Opus/FLAC were encoded with FFmpeg (`libopus` at 64 kbit/s and native FLAC, `-map_metadata -1`). Tests check Opus pre-skip/end trim, exact sample mapping, CRC/truncation rejection and bounded source reads.
+- `synthetic-extended-low24.wav`, `.flac`: 800 mono PCM24 samples at 8 kHz; the first three integer samples are 1, -1 and 2, followed by zero. This exercises tiny nonzero float output and a valid 13-byte final FLAC frame. FLAC fixtures are mono; they do not establish multichannel coverage.
+- `tone-aac.m4a`, `tone.aac`: generated 2-second 440 Hz mono input at 48 kHz, native FFmpeg AAC at 96 kbit/s. M4A presents 96000 samples; ADTS remux retains 97280 samples including transport priming/padding.
+- `tone-he-aac.m4a`, `tone-he.aac`, `tone-he-aac-v2.m4a`, `tone-he-v2.aac`: the same generated tone at 48 kHz stereo, encoded with AudioToolbox `aac_at` profiles 4 / 28 at 48 / 32 kbit/s; ADTS uses `-c copy -f adts`. M4A declares 2090 ms and physically presents 100288 samples after priming; ADTS retains 102400 samples. The original 2-second tone is not their encoded duration assertion.
+- `multi-aac.m4a`: multiple AAC tracks, expected rejection. AAC construction commands and exact timing checks are documented in [the codec module](../../codecs/aac/README.md).
 - `offset.mp4`: nonzero presentation origin, expected rejection.
 - `multi-audio.mp4`: multiple soundtrack tracks, expected rejection.
 - `encrypted.mp4`: synthetic encrypted media, expected rejection without a decryption key.
 
-Generated using FFmpeg as a development fixture tool; FFmpeg is not a Worker dependency or runtime service. These files validate demux/runtime contracts, not model accuracy. The first attempt to mux an 8 kHz MP3 track failed; the valid AV fixture uses 44.1 kHz. No failed fixture was relabeled as a successful recording.
+FFmpeg CLI and AudioToolbox are development fixture tools; no external transcoding process runs in the Worker. AAC decoding does use the separately packaged FFmpeg WASM subset described in [the codec module](../../codecs/aac/README.md). These files validate demux/runtime contracts, not model accuracy. The first attempt to mux an 8 kHz MP3 track failed; the valid AV fixture uses 44.1 kHz. No failed fixture was relabeled as a successful recording.
+
+- `tone-aac-44100.m4a`: 88,949 generated 330 Hz samples at 44.1 kHz. Its millisecond movie-clock edit duration is 2,017 ticks, which is not an integer sample count; verifies legal movie-clock rounding without appending silence.

@@ -20,6 +20,27 @@
       "license": "MIT",
       "packageSource": "https://registry.npmjs.org/simple-yenc/-/simple-yenc-1.0.4.tgz",
       "gitHead": "3f87552b39abc2791f1e5331cb444a2726abeb86"
+    },
+    {
+      "name": "opus-decoder",
+      "version": "0.7.12",
+      "license": "MIT",
+      "packageSource": "https://registry.npmjs.org/opus-decoder/-/opus-decoder-0.7.12.tgz",
+      "gitHead": "c9ff316db7f21fe95b0e89b308d0720fde6fecd2"
+    },
+    {
+      "name": "@wasm-audio-decoders/flac",
+      "version": "0.2.11",
+      "license": "MIT",
+      "packageSource": "https://registry.npmjs.org/@wasm-audio-decoders/flac/-/flac-0.2.11.tgz",
+      "gitHead": "11530fe7d1ed6d78e6b968297e7f858c322704d2"
+    },
+    {
+      "name": "codec-parser",
+      "version": "2.5.0",
+      "license": "LGPL-3.0-or-later",
+      "packageSource": "https://registry.npmjs.org/codec-parser/-/codec-parser-2.5.0.tgz",
+      "gitHead": "7834ca161922cd58f5e627d75b7dcc45dcce7e58"
     }
   ],
   "mitTextProvenance": {
@@ -34,5 +55,13 @@
   "mpg123SourceArchive": "https://github.com/madebr/mpg123/archive/08247b317163175e62035893af3ff9e71a5dfefd.tar.gz",
   "mpg123CopyrightAndLicense": "https://github.com/madebr/mpg123/blob/08247b317163175e62035893af3ff9e71a5dfefd/COPYING",
   "upstreamChanges": "Only JS import routing in generated copies, to exclude Worker adapters. No changes to mpg123 C, upstream original files, WASM bytes, or decoder logic.",
-  "buildAdapter": "memory/scripts/prepare-mp3.mjs"
+  "buildAdapter": "memory/scripts/prepare-mp3.mjs",
+  "extendedAudio": {
+    "adapter": "memory/scripts/prepare-audio-codecs.mjs",
+    "opusSource": "https://github.com/xiph/opus/tree/ddbe48383984d56acd9e1ab6a090c54ca6b735a6",
+    "flacSource": "https://github.com/xiph/flac/tree/1507800de4b70e21be71f38caa0d9079d0bc6e45",
+    "nativeLicenses": "Opus COPYING and libFLAC COPYING.Xiph (BSD-style terms); copied verbatim into memory/licenses/.",
+    "parserChanges": "Generated copy of codec-parser 2.5.0 receives two EOF handling fixes in CodecParser.js and FLACParser.js; exact asserted transformations are in the included build adapter. Original package and license are preserved.",
+    "aac": "See memory/codecs/aac/ for the independent FFmpeg decoder, complete corresponding FFmpeg source, bridge and rebuild instructions."
+  }
 }

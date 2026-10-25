@@ -23,8 +23,19 @@ These packages are declared dependencies, installed by the recipient. They are n
 | @wasm-audio-decoders/common | 9.0.7 | MIT | [wrapper and common attribution](memory/licenses/wasm-audio-decoders-MIT.txt); [pinned sources](memory/licenses/SOURCES.json) |
 | simple-yenc | 1.0.4 | MIT | [original license](memory/licenses/simple-yenc-LICENSE.txt); [pinned sources](memory/licenses/SOURCES.json) |
 | mpg123 C library compiled into decoder WASM | revision `08247b317163175e62035893af3ff9e71a5dfefd` | LGPL-2.1 | Copyright (c) 1995-2020 by Michael Hipp and others; [COPYING, including license texts](memory/licenses/mpg123-COPYING.txt); [source/build provenance](memory/licenses/SOURCES.json) |
+| opus-decoder / libopus | wrapper 0.7.12; native revision `ddbe48383984d56acd9e1ab6a090c54ca6b735a6` | MIT wrapper; native BSD-style terms | [wrapper notice](memory/licenses/wasm-audio-decoders-MIT.txt), [libopus COPYING](memory/licenses/opus-COPYING.txt), [exact sources](memory/licenses/SOURCES.json) |
+| @wasm-audio-decoders/flac / libFLAC | wrapper 0.2.11; native revision `1507800de4b70e21be71f38caa0d9079d0bc6e45` | MIT wrapper; native BSD-3-Clause | [wrapper notice](memory/licenses/wasm-audio-decoders-MIT.txt), [libFLAC COPYING.Xiph](memory/licenses/flac-COPYING.Xiph.txt), [exact sources](memory/licenses/SOURCES.json) |
+| codec-parser | 2.5.0 | LGPL-3.0-or-later | [LGPL text](memory/licenses/codec-parser-LGPL-3.0.txt), [referenced GPL text](memory/licenses/GPL-3.0.txt), [exact package and modification provenance](memory/licenses/SOURCES.json) |
 
 `memory/scripts/prepare-mp3.mjs` changes only generated JavaScript import routing to omit Worker adapters. It does not change the upstream C implementation or WASM bytes. The adapter source is included, so recipients can inspect and reproduce these routing changes.
+
+`memory/scripts/prepare-audio-codecs.mjs` likewise supplies static Opus/FLAC WASM modules without changing their decoder algorithms. Its generated copy of `codec-parser@2.5.0` has two documented EOF handling fixes: it retains a short final FLAC frame and respects a verified next-frame boundary while flushing. The fixed source is produced from the pinned original package using the included explicit transformations and retains the LGPL license. The wrapper's MIT license does not relicense this parser.
+
+## Included AAC decoder
+
+`memory/codecs/aac/` contains an independent, replaceable FFmpeg 9.0 AAC decoder module, its C bridge, complete corresponding FFmpeg source archive, license texts and build instructions. This is a deliberate binary exception to the otherwise source-based application distribution. The decoder is built with GPL/nonfree components disabled and without FFmpeg's CLI, networking, demuxers or external codec libraries. Its library license is LGPL-2.1-or-later; it is not covered by this project's Apache notice. Emscripten-generated glue and runtime notices are included alongside it.
+
+Recipients may rebuild or replace this module and debug such modifications. The application and bridge source, [rebuild script](memory/scripts/build-aac-codec.sh), and complete library source are supplied for this purpose. Normal `npm run setup` uses the included module; rebuilding it is an explicit development operation and does not install or activate a system SDK.
 
 Mediabunny's preferred source form is available in the pinned npm archive above. Its MPL-covered files remain MPL-2.0, including any future modifications to those files. See [MPL 2.0 sections 3.1–3.3](https://www.mozilla.org/en-US/MPL/2.0/). Separate original project files are not thereby relicensed.
 
@@ -40,7 +51,7 @@ The media in `memory/test/fixtures/` and `test/live-fixtures/` are synthetic pro
 
 ## Building versus redistributing an executable
 
-The current deliverable is a source repository. No `node_modules`, installed Python environment, generated decoder WASM, Worker bundle, model weights, or production data are part of this source distribution.
+The current deliverable contains application source plus the separately documented AAC decoder above. No `node_modules`, installed Python environment, generated npm decoder WASM, Worker bundle, model weights, or production data are included.
 
 Before distributing a built bundle, container, installed environment, or decoder WASM (including privately to friends), inspect the actual included artifacts and preserve their notices. Specifically:
 

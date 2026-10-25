@@ -21,6 +21,36 @@ function open(mimeType: string, media: RangeMedia): Input {
     },
   }), formatOptions: { isobmff: { resolveKeyId: () => fail('media_encrypted') } } });
 }
+/** Identify shared ISO brands by their tracks; full codec validation follows separately. */
+export async function classifyIsoMedia(mimeType: string, source: RangeMedia): Promise<string> {
+  // The demuxer allocates a complete moov before invoking CustomSource.read.
+  // Inspect top-level sizes first; this guard never reads the media payload.
+  if (!Number.isSafeInteger(source.size) || source.size <= 0) return fail('media_size_invalid');
+  for (let at = 0; at < source.size;) {
+    const head = await source.read(at, Math.min(16, source.size - at));
+    if (head.length < 8) return fail('media_container_invalid');
+    const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
+    const type = String.fromCharCode(...head.subarray(4, 8));
+    let length = view.getUint32(0), header = 8;
+    if (length === 1) {
+      if (head.length < 16) return fail('media_container_invalid');
+      const wide = view.getBigUint64(8); header = 16;
+      if (wide > BigInt(Number.MAX_SAFE_INTEGER)) return fail('media_container_invalid');
+      length = Number(wide);
+    }
+    if (length === 0) length = source.size - at;
+    if (length < header || length > source.size - at) return fail('media_container_invalid');
+    if (['moov', 'ftyp'].includes(type) && length - header > 8 * 1024 * 1024) return fail('media_inspection_metadata_limit', 413);
+    at += length;
+  }
+  const input = open(mimeType, source);
+  try {
+    return !await input.getPrimaryVideoTrack() && await input.getPrimaryAudioTrack() ? 'audio/mp4' : mimeType;
+  } catch (error) {
+    if (error instanceof MemoryError) throw error;
+    return fail('media_container_invalid');
+  } finally { input.dispose(); }
+}
 async function inspect(input: Input): Promise<Timeline> {
   const tracks = await input.getTracks();
   const videos = tracks.filter(t => t.isVideoTrack()), audios = tracks.filter(t => t.isAudioTrack());

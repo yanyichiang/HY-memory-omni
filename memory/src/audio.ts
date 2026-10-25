@@ -1,5 +1,6 @@
 import { BufferSource, EncodedPacketSink, Input, MP3, WAVE } from 'mediabunny';
 import { MemoryError, type Timeline } from './service.js';
+import { isExtendedAudio, nativeAudio } from './native-audio.js';
 
 export interface AudioWindow { mimeType: 'audio/wav'; bytes: Uint8Array; startMs: number; endMs: number; digitalSilence: boolean }
 export interface PreparedAudio {
@@ -32,6 +33,11 @@ export async function prepareAudio(mimeType: string, bytes: Uint8Array, timeline
   if (bytes.byteLength === 0 || bytes.byteLength > 8 * 1024 * 1024) throw new MemoryError('audio_bytes_limit', 413);
   if (!timeline.hasAudio || timeline.hasVideo || !Number.isSafeInteger(timeline.durationMs)
     || timeline.durationMs <= 0 || timeline.durationMs > 180000) throw new MemoryError('audio_timeline_invalid', 415);
+  if (isExtendedAudio(mimeType)) {
+    // nativeAudio releases its decoder permit before the WAV preparation acquires it.
+    const normalized = await nativeAudio({ mimeType, bytes }, timeline);
+    return prepareAudio(normalized.mimeType, normalized.bytes, timeline);
+  }
   const format = mimeType === 'audio/wav' ? WAVE : mimeType === 'audio/mpeg' ? MP3 : undefined;
   if (!format) throw new MemoryError('audio_type_unsupported', 415);
   const release = await acquireAudio();
