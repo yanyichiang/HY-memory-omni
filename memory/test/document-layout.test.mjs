@@ -60,7 +60,7 @@ test('actual Worker retains raw DOCX run/style/section/table layout without reso
     assert.equal(first.formatting.styles.find(s => s.styleId === 'ToggleChar').basedOn, 'BaseChar');
     assert.ok(prop(prop(first.formatting.docDefaults, 'rPrDefault'), 'rPr'));
     assert.equal(first.formatting.styles.some(s => ['Unused', 'Grid', 'CycleA'].includes(s.styleId)), false);
-    assert.equal(prop(first.sectionProperties, 'pgSz').attributes.w, '12240'); assert.equal(prop(first.sectionProperties, 'cols').attributes.num, '2');
+    assert.equal(prop(first.sectionProperties, 'pgSz').attributes.w, '12240'); assert.equal(prop(first.sectionProperties,'pgSz').measurements.w.inches,8.5); assert.equal(prop(first.sectionProperties, 'cols').attributes.num, '2');
     assert.equal(prop(result.units[1].context.sectionProperties, 'pgSz').attributes.orient, 'landscape');
     const table = result.units[2].context;
     assert.equal(prop(table.tableProperties, 'tblW').attributes.type, 'pct');

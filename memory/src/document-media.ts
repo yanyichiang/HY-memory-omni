@@ -1,4 +1,5 @@
 import { parseDocument, documentMime, DOCUMENT_MIME_TYPES } from '../documents/parse.mjs';
+import { renderOffice } from '../documents/office-render.mjs';
 import { MemoryError, decode, encode, record } from './service.js';
 import { nativeMedia } from './native-media.js';
 import type { DocumentUnit, DocumentCoverage } from './document-types.js';
@@ -22,9 +23,16 @@ export async function prepareDocument(mimeType:string,bytes:Uint8Array):Promise<
   let parsed:Awaited<ReturnType<typeof parseDocument>>;
   try {parsed=await parseDocument(mimeType,bytes);} catch(error) {throw new MemoryError(error instanceof Error?error.message:'document_parse_failed',415);}
   if(!parsed.units.length||parsed.units.length>128) throw new MemoryError('document_unit_count_limit',413);
+  // Native coordinates and rendered pages share one original; neither is a second witness.
+  let rendered:Awaited<ReturnType<typeof renderOffice>>;
+  try {rendered=parsed.units.every(unit=>unit.empty) ? {units:[],coverage:{unsupported:[]}} : await renderOffice(mimeType,bytes);}
+  catch(error){const code=error instanceof Error?error.message:'office_render_failed';throw new MemoryError(code,/budget|limit|exceeded/.test(code)?413:415);}
+  const coverage={unsupported:[...parsed.coverage.unsupported,...rendered.coverage.unsupported]};
+  const representations=[...parsed.units,...rendered.units];
+  if(representations.length>256) throw new MemoryError('document_unit_count_limit',413);
   let total=0;
   const units=[];
-  for(const value of parsed.units){
+  for(const value of representations){
     if(value.images.length>6) throw new MemoryError('document_unit_image_limit',413);
     // No text-only substitute for an unsupported embedded image.
     for(const image of value.images) {
@@ -39,7 +47,7 @@ export async function prepareDocument(mimeType:string,bytes:Uint8Array):Promise<
     if(packed.length>cap || total>24*1024*1024) throw new MemoryError('document_representation_limit',413);
     units.push({bytes:packed,locator:unit.locator,coverage:unit.coverage});
   }
-  return {units,coverage:parsed.coverage};
+  return {units,coverage};
 }
 export async function documentParts(bytes:Uint8Array):Promise<{unit:DocumentUnit;parts:DocumentProviderPart[]}> {
   const unit=readDocumentUnit(bytes),parts:DocumentProviderPart[]=[];

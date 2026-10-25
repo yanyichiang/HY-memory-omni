@@ -1,16 +1,22 @@
+import {prepareOfficeFonts} from './scripts/prepare-office-fonts.mjs';
+import {prepareOffice} from './scripts/prepare-office.mjs';
 import {preparePdf} from './scripts/prepare-pdf.mjs';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { basename } from 'node:path';
-import { copyFile, cp } from 'node:fs/promises';
+import { copyFile, cp, rm } from 'node:fs/promises';
 import { prepareMp3 } from './scripts/prepare-mp3.mjs';
 import { prepareAudioCodecs } from './scripts/prepare-audio-codecs.mjs';
 import { prepareMatroska } from './scripts/prepare-matroska.mjs';
 const root = fileURLToPath(new URL('.', import.meta.url));
+await prepareOfficeFonts();
+await prepareOffice();
 await prepareMp3();
 await prepareAudioCodecs();
 const matroskaEntry = await prepareMatroska();
 const pdfEntry=await preparePdf();
+// Runtime packages every dist module; obsolete hashed chunks must not accumulate.
+await rm(new URL('dist/', import.meta.url), {recursive:true,force:true});
 await build({ absWorkingDir: root, entryPoints: ['src/worker.ts', 'src/document-jobs.ts', 'src/document-media.ts', 'src/service.ts', 'src/models.ts', 'src/media.ts', 'src/audio.ts', 'src/extended-audio.ts', 'src/aac-audio.ts', 'src/native-audio.ts', 'src/native-image.ts', 'src/audio-models.ts', 'src/knowledge.ts', 'src/knowledge-models.ts', 'src/storage.ts', 'src/staged-store.ts', 'src/paged-store.ts', 'src/vector-index.ts', 'src/node-store.ts', 'src/knowledge-store.ts', 'src/video.ts', 'src/video-models.ts', 'src/long-video.ts', 'src/long-audio.ts', 'src/uploads.ts'],
   outdir: 'dist', bundle: true, splitting: true, format: 'esm', platform: 'browser', target: 'es2022',
   external: ['cloudflare:workers'], sourcemap: true, alias: { mediabunny: matroskaEntry, 'pdf-lib':pdfEntry },
@@ -35,3 +41,6 @@ for (const [codec, wasm] of [['heif','image-decoder'],['animation','animation']]
 for (const codec of ['heif','gif','animation']) await cp(new URL(`codecs/${codec}/`, import.meta.url), new URL(`dist/licenses/${codec}/`, import.meta.url), { recursive: true });
 
 await cp(new URL('.generated/pdf-lib/', import.meta.url), new URL('dist/licenses/pdf-lib/', import.meta.url), {recursive:true});
+
+await cp(new URL('fonts/', import.meta.url), new URL('dist/licenses/office-fonts/', import.meta.url), {recursive:true});
+await cp(new URL('.generated/reamkit/', import.meta.url), new URL('dist/licenses/reamkit/', import.meta.url), {recursive:true});

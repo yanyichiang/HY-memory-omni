@@ -1,0 +1,15 @@
+# Bundled Office fonts
+
+HY Office Sans SC is a modified subset of Google Fonts' **Noto Sans SC**, distributed under **SIL Open Font License 1.1**, independently of Ream's or Wordcanvas's JavaScript licenses. The complete upstream copyright and license are in [licenses/NotoSansSC-OFL.txt](licenses/NotoSansSC-OFL.txt).
+
+Source: [`google/fonts` commit e7db6ca603fd4862010383ff17ffd6cc4ffac1c0, ofl/notosanssc](https://github.com/google/fonts/tree/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/notosanssc). Input: `NotoSansSC[wght].ttf` (17,772,300 bytes; Git blob `fb0637bafbcd804fe32152370a1225990745b4bc`, verified against the pinned repository contents API). Internal version: `2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603`. Copyright 2014–2021 Adobe, Reserved Font Name “Source”. The modified font uses the distinct family **HY Office Sans SC**; copyright/license names remain intact.
+
+Reproduction (generation is a development operation, never a runtime dependency): obtain the pinned input above and run `python subset.py 'NotoSansSC[wght].ttf' output` with **fontTools 4.62.1**, then copy the two TTF files and convert `coverage.json` to the `export default [...]` module in `coverage.mjs`. The script subsets to all decodable GB2312 characters and selected Latin, punctuation, kana and symbol ranges, then instances real weights 400 and 700. `coverage.mjs` records the actual resulting cmap shared by both faces, rather than claiming whole Unicode blocks. Unsupported visible code points must cause a clear unsupported glyph error before PDF publication.
+
+`memory/scripts/prepare-office-fonts.mjs` converts only these local TTF files to a generated base64 JavaScript module. The runtime decodes each face once. It performs no network requests and consults no operating-system fonts. Binary source fonts and the OFL text must accompany redistributed builds/source.
+
+All source Office families are replaced by this bundled sans-serif family. Regular and bold use real outlines. Italic falls back to regular and bold-italic to bold through Ream's font registry. This is a font substitution renderer: it does not preserve original font metrics, guarantee Microsoft Office pagination, or provide complete CJK/Unicode coverage. Complex shaping/layout limitations belong to the renderer and are not resolved by this font bundle.
+
+The earlier Wordcanvas probe's `NotoSansSC-Regular.ttf` was **not reused**: its internal metadata identifies a Thin face despite its filename. No proprietary Times New Roman font or other Wordcanvas font is included.
+
+Verified output: regular 2,380,896 bytes; bold 2,380,168 bytes (4,761,064 total). Separate gzip sizes: 1,485,946 and 1,507,330 bytes; these are font-only measurements, not the complete Worker bundle size. Both faces share 7,917 Unicode mappings and cover all 7,445 characters decodable by Python GB2312, including its 6,763 Hanzi. Actual coverage is in `coverage.mjs`; characters such as U+20BB7 and emoji U+1F600 are intentionally unsupported and detected. Font metadata verifies weights 400/700 and renamed family/style records.

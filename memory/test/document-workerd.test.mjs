@@ -100,13 +100,13 @@ test('actual SQLite/R2 Worker publishes document units atomically and fences reb
   };
   const api = async (path, body) => { const r = await request(path, body); assert.equal(r.status, 200, path + ': ' + JSON.stringify(r.result)); return r.result; };
   const reject = async (path, body, error) => { const r = await request(path, body); assert.notEqual(r.status, 200, path); assert.equal(r.result.error, error, path); };
-  const finish = async id => { let state; for (let i = 0; i < 130; i++) { state = await api('/step', { operationId: id }); if (state.state === 'complete') return state; assert.equal(state.state, 'queued'); } assert.fail('document job did not finish within unit bound'); };
+  const finish = async id => { let state; for (let i = 0; i < 258; i++) { state = await api('/step', { operationId: id }); if (state.state === 'complete') return state; assert.equal(state.state, 'queued'); } assert.fail('document job did not finish within unit bound'); };
   try {
     const fixtures = await documentFixtures(), roots = [];
     for (const [index, fixture] of fixtures.entries()) {
       const operationId = 'document-' + index;
       const input = { operationId, messageRef: operationId, sessionRef: 'fixture', mimeType: fixture.mimeType, dataBase64: Buffer.from(fixture.bytes).toString('base64') };
-      const queued = await api('/create', input); assert.equal(queued.state, 'queued'); assert.equal(queued.units, fixture.units);
+      const queued = await api('/create', input); assert.equal(queued.state, 'queued'); assert.ok(queued.units >= fixture.units);
       assert.deepEqual((await api('/create', input)).ref, queued.ref, 'admission receipt must not create a second root');
       assert.equal((await api('/validate', { refs: [queued.ref] })).valid, false);
       const pending = await api('/search'); assert.ok(!pending.documents?.some(d => d.original?.sourceId === queued.ref.sourceId || d.ref?.sourceId === queued.ref.sourceId));
@@ -118,9 +118,13 @@ test('actual SQLite/R2 Worker publishes document units atomically and fences reb
         assert.ok(!JSON.stringify(partial).includes(queued.ref.sourceId), 'partial unit must not enter search/knowledge');
       }
       await finish(operationId);
-      const page = await api('/units', { ref: queued.ref }); assert.equal(page.units.length, fixture.units);
+      const page = await api('/units', { ref: queued.ref }); assert.equal(page.units.length, queued.units);
+      const rendered=page.units.filter(u=>u.locator.kind==='office-rendered-page');
+      assert.equal(page.units.length-rendered.length,fixture.units);
+      assert.equal(rendered.length>0,/docx|xlsx/.test(fixture.name));
       for (const u of page.units) {
         const read = await api('/read', { ref: u.ref }); assert.deepEqual(read.documentUnit.original, queued.ref); assert.deepEqual(read.documentUnit.locator, u.locator);
+        if(u.locator.kind==='office-rendered-page'){const unit=JSON.parse(atob(read.dataBase64));assert.equal(unit.derived.mimeType,'application/pdf');assert.ok(unit.context.rendering);assert.ok(unit.coverage.unsupported.length>0);}
         assert.ok(read.provenance.derivedFrom.some(r => r.sourceId === queued.ref.sourceId));
         assert.deepEqual(read.provenance.roots, [queued.ref.sourceId], 'same document units are not independent roots');
         assert.equal(read.provenance.independence, 'not-established');
@@ -137,7 +141,8 @@ test('actual SQLite/R2 Worker publishes document units atomically and fences reb
       assert.ok(embedding.some(p => p.inline_data?.mime_type === (fixture.mimeType === 'application/pdf' ? 'application/pdf' : 'image/png')), 'unit native media must reach embedding');
       const search = await api('/search'); assert.ok(search.items.some(i => i.documentEvidence?.some(e => e.original.sourceId === queued.ref.sourceId)), 'source-bound document evidence missing');
       const groups = search.documents.filter(d => d.ref.sourceId === queued.ref.sourceId);
-      assert.equal(groups.length, 1, 'several units must remain one root group'); assert.equal(groups[0].units.length, fixture.units);
+      assert.equal(groups.length, 1, 'several units must remain one root group'); assert.equal(groups[0].units.length, queued.units);
+      for(const evidence of search.items.flatMap(i=>i.documentEvidence??[])){assert.equal(evidence.basis,evidence.locator.kind==='office-rendered-page'?'rendered-document-page':'native-document-unit');}
       roots.push({ ...queued, input, child: page.units[0].ref, operationId });
     }
     // Durable restart must preserve the original and unit locators.
@@ -176,6 +181,18 @@ test('actual SQLite/R2 Worker publishes document units atomically and fences reb
     await finish('reinspect-document'); assert.equal((await api('/validate', { refs: [corrected.ref] })).valid, false);
     assert.equal((await api('/read', { ref: reinspected.ref })).dataBase64, first.input.dataBase64);
     roots[0].ref = reinspected.ref;
+
+    // Rebuild the actual Office source and both representations, preserving a single root.
+    const office=roots[1], oldOffice=office.ref, oldOfficeUnits=(await api('/units',{ref:oldOffice})).units;
+    assert.ok(oldOfficeUnits.some(u=>u.locator.kind==='office-rendered-page'));
+    const rebuiltOffice=await api('/rebuild',{ref:oldOffice,operationId:'reinspect-office',question:'Recheck the displayed table in the rendered pages and original structure.'});
+    assert.equal((await api('/validate',{refs:[oldOffice,...oldOfficeUnits.map(u=>u.ref)]})).invalid.length,oldOfficeUnits.length+1);
+    await finish('reinspect-office');
+    const newOfficeUnits=(await api('/units',{ref:rebuiltOffice.ref})).units;
+    assert.deepEqual(newOfficeUnits.map(u=>u.locator),oldOfficeUnits.map(u=>u.locator));
+    for(const unit of newOfficeUnits){const read=await api('/read',{ref:unit.ref});assert.deepEqual(read.documentUnit.original,rebuiltOffice.ref);assert.deepEqual(read.provenance.roots,[rebuiltOffice.ref.sourceId]);}
+    assert.equal((await api('/read',{ref:rebuiltOffice.ref})).dataBase64,office.input.dataBase64);
+    office.ref=rebuiltOffice.ref;
 
     for (const [index, fixture] of (await emptyDocumentFixtures()).entries()) {
       const stats = await api('/stats'), operationId = 'empty-document-' + index;

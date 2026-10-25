@@ -1,4 +1,5 @@
 import { MemoryError, MemoryService, encode, sourceRef, text, timeRange, type Source, type SourceRef, type TimeRange } from './service.js';
+import { isMatroska } from './matroska-video.js';
 import { inspectLongVideo, nextFixedRange, sliceVideo, type RangeMedia } from './video.js';
 import { inspectLongAudio, sliceLongAudio } from './long-audio.js';
 import { audioDecoderName } from './native-audio.js';
@@ -39,7 +40,26 @@ export class LongVideo {
       const bytes = await raw.read(offset, length);
       await this.service.source(source.ref, pending);
       return bytes;
-    } };
+    }, ...(isMatroska(source.mimeType) ? { matroskaCache: this.preparedCache(source, pending) } : {}) };
+  }
+  private preparedCache(source: Source, pending: boolean): NonNullable<RangeMedia['matroskaCache']> {
+    const keyFor = (name: string) => {
+      if (!/^[a-zA-Z0-9_/-]+(?:\.[a-zA-Z0-9]+)?$/.test(name) || name.length > 160 || name.startsWith('/') || name.split('/').some(part => !part || part === '..')) throw new MemoryError('media_prepared_key_invalid');
+      return `${source.key}.clips/${source.ref.revision}/prepared/${name}`;
+    };
+    return {
+      get: async name => {
+        await this.service.source(source.ref, pending);
+        const bytes = await this.service.blobs.get(keyFor(name));
+        await this.service.source(source.ref, pending);
+        return bytes;
+      },
+      put: async (name, bytes) => {
+        await this.service.source(source.ref, pending);
+        await this.service.blobs.put(keyFor(name), bytes, 'application/octet-stream');
+        await this.service.source(source.ref, pending);
+      },
+    };
   }
   private async slice(source: Source, requested: TimeRange, pending = false) {
     const media = await this.media(source, pending);
@@ -69,12 +89,22 @@ export class LongVideo {
     }
     if (previous.old !== undefined) return previous.old;
     try {
-      const timeline = await (input.mimeType.startsWith('audio/') ? inspectLongAudio : inspectLongVideo)(input.mimeType, await this.range(key));
       const ref = { sourceId: crypto.randomUUID(), revision: 1, mediaRef: crypto.randomUUID() };
-      const source: Source = { ref, key, messageRef, sessionRef, mimeType: input.mimeType, timeline, state: 'pending', video: {
+      const source: Source = { ref, key, messageRef, sessionRef, mimeType: input.mimeType, state: 'pending', video: {
         strategy: input.strategy, seconds: input.seconds, minDurationMs: input.minDurationMs, cursorMs: 0, complete: false } };
-      await this.service.db.transaction(async () => {
+      // Establish the revision before inspection writes any derived checkpoints.
+      // Failed/unknown admission retains an explicit ref that can be revoked/deleted;
+      // the existing .clips/<revision>/ sweep covers every prepared object.
+      const prepareMatroska = isMatroska(input.mimeType);
+      if (prepareMatroska) await this.service.db.transaction(async () => {
         await this.service.saveSource(source); await this.service.stage(operationId, ref, 'upload');
+      });
+      const timeline = await (input.mimeType.startsWith('audio/') ? inspectLongAudio : inspectLongVideo)(input.mimeType,
+        prepareMatroska ? await this.media(source, true) : await this.range(key));
+      await this.service.db.transaction(async () => {
+        if (prepareMatroska) await this.service.source(ref, true);
+        await this.service.saveSource({ ...source, timeline });
+        if (!prepareMatroska) await this.service.stage(operationId, ref, 'upload');
         await this.queue({ kind: 'ingest', operationId, ref, state: 'queued', cursorMs: 0 });
       });
       return { ref, state: 'queued', operationId };
@@ -210,9 +240,10 @@ export class LongVideo {
       // remain on video/status and read; never repeat invalidation or model work.
       return { ref: job.ref, operationId, state: 'queued' };
     }
-    await this.service.begin(operationId, binding);
     const original = await this.service.source(ref, true);
     if (!original.video) throw new MemoryError('source_not_long_video', 400);
+    if (!original.timeline) throw new MemoryError('video_inspection_incomplete', 409);
+    await this.service.begin(operationId, binding);
     let source = await this.service.invalidate(ref, 'pending', correction);
     source = { ...source, ...(question ? { reinspectionQuestion: text(question, 8000) } : {}) };
     await this.service.db.transaction(async () => {

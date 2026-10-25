@@ -21,8 +21,9 @@ try {
   }).map(([name,value])=>[name,strToU8(value)])));
   await writeFile(join(out,'format-sensitive.docx'),source,{mode:0o600});
   const prepared=await prepareDocument('application/vnd.openxmlformats-officedocument.wordprocessingml.document',source);
-  if(prepared.units.length!==1)throw Error('Expected one native unit.');
-  const bytes=prepared.units[0].bytes;
+  const native=prepared.units.filter(unit=>unit.locator.kind==='docx-block');
+  if(native.length!==1)throw Error('Expected one native unit.');
+  const bytes=native[0].bytes;
   await writeFile(join(out,'unit.json'),bytes,{mode:0o600});
   const models=new CloudflareMemoryModels({accountId:config.CF_ACCOUNT_ID,gatewayId:config.MEMORY_GATEWAY_ID,token:config.MEMORY_MODEL_TOKEN,temporalModel:config.MEMORY_TEMPORAL_MODEL,formationModel:config.MEMORY_FORMATION_MODEL,textEmbeddingModel:config.MEMORY_TEXT_EMBEDDING_MODEL,mediaEmbeddingModel:config.MEMORY_MEDIA_EMBEDDING_MODEL},{fetch(){throw Error('Engine forbidden in focused layout grounding.');}},async(url,init)=>{
     if(url.includes(':embedContent'))throw Error('Embedding forbidden.');

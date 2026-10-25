@@ -1,8 +1,9 @@
+import './wasm-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { LongVideo } from '../dist/long-video.js';
-import { MemoryError } from '../dist/service.js';
+import { MemoryError, MemoryService } from '../dist/service.js';
 const bytes = new Uint8Array(readFileSync(new URL('fixtures/blue-tone.mp4', import.meta.url)));
 function harness(original = bytes) {
   const rows = new Map(), blobs = new Map([['root.mp4', original]]), calls = [];
@@ -261,4 +262,42 @@ test('audio unknown effects require explicit whole-source recovery and never rep
   assert.equal(recovered.ref.revision,ref.revision+1);assert.equal((await h.manager.status('audio-recovery')).cursorMs,0);
   assert.equal((await h.manager.status('upload')).state,'superseded');
   assert.deepEqual(await h.service.blobs.get('root.mp4'),original);
+});
+
+test('Matroska inspection failure retains a pending source receipt without repeating inspection',async()=>{
+  const h=harness(),input={...create,mimeType:'video/x-matroska'};
+  await assert.rejects(h.manager.create(input)); // MP4 bytes deliberately fail Matroska inspection.
+  const status=await h.manager.status(input.operationId);
+  assert.equal(status.state,'unknown');assert.ok(status.ref);
+  const source=await h.service.source(status.ref,true);
+  assert.equal(source.state,'pending');assert.equal(source.timeline,undefined);
+  assert.equal(await h.db.get(`job:${input.operationId}`),undefined);
+  await assert.rejects(h.manager.rebuild(status.ref,'reinspect-incomplete','Try again'),/video_inspection_incomplete/);
+  assert.equal(await h.db.get('operation:reinspect-incomplete'),undefined);
+  assert.equal(await h.db.get('job:reinspect-incomplete'),undefined);
+  h.manager.range=async()=>{throw Error('must_not_reinspect_unknown')};
+  assert.equal((await h.manager.create(input)).state,'unknown');
+});
+
+test('prepared Matroska cache fences late reads and leaves no untracked write after invalidation',async()=>{
+  for(const failAfterWrite of [false,true]){
+    const h=harness(),ref={sourceId:'cache-root',revision:1,mediaRef:'cache-media'};
+    const source={ref,key:'root.mkv',mimeType:'video/x-matroska',state:'pending',video:{cursorMs:0,complete:false}};
+    await h.service.saveSource(source);
+    const cache=h.manager.preparedCache(source,true),key='root.mkv.clips/1/prepared/aac.bin';
+    await cache.put('aac.bin',new Uint8Array([1]));
+    assert.deepEqual(await cache.get('aac.bin'),new Uint8Array([1]));
+    await assert.rejects(cache.put('../outside.bin',new Uint8Array([1])),/media_prepared_key_invalid/);
+    let enter,release;const entered=new Promise(r=>{enter=r}),blocked=new Promise(r=>{release=r});
+    const put=h.service.blobs.put;
+    h.service.blobs.put=async(k,b)=>{enter();await blocked;await put(k,b);if(failAfterWrite)throw Error('put_receipt_lost')};
+    const writing=cache.put('aac.bin',new Uint8Array([2]));await entered;
+    // Use the actual authority invalidation, including its persistent GC tombstone.
+    await MemoryService.prototype.invalidate.call(h.service,ref,'revoked');
+    release();await assert.rejects(writing,/source_changed|put_receipt_lost/);
+    await assert.rejects(cache.get('aac.bin'),/source_changed/);
+    const gc=await h.db.page('media-gc:',undefined,10);
+    assert.ok(await h.service.blobs.get(key)===null||gc.entries.some(({value})=>key.startsWith(value.prefix)),
+      'a late prepared write must be deleted or scheduled for another revision-prefix sweep');
+  }
 });

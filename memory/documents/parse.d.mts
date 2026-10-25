@@ -37,3 +37,7 @@ export type ParsedDocument = {
 export function parseDocument(mimeType: string, bytes: Uint8Array): Promise<ParsedDocument>;
 
 export function documentMime(bytes:Uint8Array):DocumentMimeType|undefined;
+/** Internal renderer helpers reuse the original-evidence package admission. */
+export function officePackageParts(bytes:Uint8Array):Map<string,Uint8Array>;
+export function officeXml(parts:Map<string,Uint8Array>,path:string):unknown;
+export function splitDerivedOfficePdf(bytes:Uint8Array):Promise<DocumentUnit[]>;

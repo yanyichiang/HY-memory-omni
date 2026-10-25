@@ -1,3 +1,4 @@
+import {wordMeasurements} from './office-measurements.mjs';
 // Copyright YY. Apache-2.0. Dependencies and evidence boundaries: ./README.md.
 import * as pdfLib from 'pdf-lib';
 import { withPdfBudget } from './pdf-budget.mjs';
@@ -223,7 +224,8 @@ function docx(parts, main, mime, units, totalCoverage) {
   // are deliberately not evaluated into effective Word formatting.
   function property(node) {
     if (!node) return undefined;
-    return { kind: node.local, ...(NS.w.includes(node.uri) ? {} : { namespace: node.uri }), attributes: Object.fromEntries((node.attributes ?? []).map(a =>
+    const measurements=wordMeasurements(node);
+    return { ...(measurements?{measurements}:{}), kind: node.local, ...(NS.w.includes(node.uri) ? {} : { namespace: node.uri }), attributes: Object.fromEntries((node.attributes ?? []).map(a =>
       [!a.uri || NS.w.includes(a.uri) ? a.local : `{${a.uri}}${a.local}`, a.value])),
       ...(node.text !== undefined ? { text: node.text } : {}),
       children: node.children.filter(c => c.local !== '#text').map(property) };
@@ -531,17 +533,7 @@ export async function parseDocument(mimeType, bytes) {
   if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > 8 * MiB) fail('document_source_size_exceeded');
   const units = [], coverage = [];
   if (mimeType === 'application/pdf') {
-    if(pdfLib.HY_PDF_BOUNDED!==true)fail('document_pdf_bounded_build_required');
-    await withPdfBudget(async()=>{
-    const doc = await PDFDocument.load(bytes,{throwOnInvalidObject:true}); if (!doc.getPageCount() || doc.getPageCount() > 128) fail('document_unit_count_exceeded');
-    let total = 0;
-    for (let pageIndex = 0; pageIndex < doc.getPageCount(); pageIndex++) {
-      const page = doc.getPage(pageIndex), d = await PDFDocument.create(); d.addPage((await d.copyPages(doc, [pageIndex]))[0]);
-      const pageBytes = await d.save(); total += pageBytes.length; if (total > 16 * MiB) fail('document_derived_size_exceeded');
-      const c = [issue('native-page-semantic-extraction-not-run')];
-      limitedUnit(units, { kind: 'pdf-page', pageIndex }, { size: page.getSize(), rotation: page.getRotation().angle, blankPage:!page.node.Contents()&&!page.node.Annots() }, [], c, { mimeType: 'application/pdf', bytes: pageBytes });
-    }
-    });
+    units.push(...await splitDerivedOfficePdf(bytes));
   } else {
     const parts = unzip(bytes), mime = contentTypes(parts), rootCoverage = [], rels = relationships(parts, '', rootCoverage);
     const roots = [...rels.values()].filter(r => !r.external && relationshipType(r.type, 'officeDocument'));
@@ -570,4 +562,29 @@ export function documentMime(bytes) {
   const type=mime(roots[0].part);
   const types=['application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml','application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml'];
   const index=types.indexOf(type);if(index<0)fail('document_package_type_unsupported');return DOCUMENT_MIME_TYPES[index+1];
+}
+
+// Renderer preflight reuses the original-evidence ZIP/XML admission limits.
+export function officePackageParts(bytes) {
+  if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > 8 * MiB) fail('document_source_size_exceeded');
+  return unzip(bytes);
+}
+export const officeXml = xml;
+
+/** Internal renderer PDF splitting: bounded derived output is distinct from original-source admission. */
+export async function splitDerivedOfficePdf(bytes) {
+  if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > 16 * MiB) fail('document_derived_size_exceeded');
+  const units=[];
+    if(pdfLib.HY_PDF_BOUNDED!==true)fail('document_pdf_bounded_build_required');
+    await withPdfBudget(async()=>{
+    const doc = await PDFDocument.load(bytes,{throwOnInvalidObject:true}); if (!doc.getPageCount() || doc.getPageCount() > 128) fail('document_unit_count_exceeded');
+    let total = 0;
+    for (let pageIndex = 0; pageIndex < doc.getPageCount(); pageIndex++) {
+      const page = doc.getPage(pageIndex), d = await PDFDocument.create(); d.addPage((await d.copyPages(doc, [pageIndex]))[0]);
+      const pageBytes = await d.save(); total += pageBytes.length; if (total > 16 * MiB) fail('document_derived_size_exceeded');
+      const c = [issue('native-page-semantic-extraction-not-run')];
+      limitedUnit(units, { kind: 'pdf-page', pageIndex }, { size: page.getSize(), rotation: page.getRotation().angle, blankPage:!page.node.Contents()&&!page.node.Annots() }, [], c, { mimeType: 'application/pdf', bytes: pageBytes });
+    }
+    });
+  return units;
 }

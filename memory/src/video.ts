@@ -5,7 +5,12 @@ import { videoSoundtrack } from './video-soundtrack.js';
 export { checkMatroska } from './matroska-container.js';
 
 /** The caller binds every read to the same authorized, immutable object revision. */
-export interface RangeMedia { size: number; read(offset: number, length: number): Promise<Uint8Array> }
+export interface RangeMedia {
+  size: number;
+  read(offset: number, length: number): Promise<Uint8Array>;
+  /** Internal inspection/checkpoint objects, bound by the host to this source revision. */
+  matroskaCache?: { get(key: string): Promise<Uint8Array | null>; put(key: string, bytes: Uint8Array): Promise<void> };
+}
 export interface VideoTrackRange {
   type: 'video' | 'audio'; codec: string; original: TimeRange; output: TimeRange; packetCount: number; mappingToleranceMs: number;
 }
