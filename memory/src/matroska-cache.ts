@@ -60,7 +60,7 @@ export class MatroskaCacheWriter {
       let at = 4 + header.length; for (const s of packets) { bytes.set(s.packet.data, at); at += s.packet.data.length; }
       const name = prefix(id, info.pages);
       await this.cache.put(name + '.bin', bytes);
-      await this.cache.put(name + '.json', encode({ start: packets[0]!.start, end: Math.max(...packets.map(p => p.end)), keyPage: pageKeyPage, count: packets.length, firstKey: packets.find(s => s.packet.type === 'key')?.start } satisfies Page));
+      await this.cache.put(name + '.json', encode({ start: packets[0]!.start, end: Math.max(...packets.map(p => p.end)), keyPage: pageKeyPage, count: packets.length, ...(packets.some(s => s.packet.type === 'key') ? { firstKey: packets.find(s => s.packet.type === 'key')!.start } : {}) } satisfies Page));
       info.pages++; packets = []; size = 0;
     };
     return {
