@@ -9,14 +9,16 @@ if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'images
 if (!process.env.HY_LIVE_OUTPUT) throw Error('Set HY_LIVE_OUTPUT to a new private results directory. This command calls your configured live models.');
 const out = resolve(process.env.HY_LIVE_OUTPUT);
 const reuseFrom = process.env.HY_LIVE_REUSE_FROM;
+const stateFrom = process.env.HY_LIVE_STATE_FROM || reuseFrom;
+const previousReport = reuseFrom ? JSON.parse(await readFile(join(resolve(reuseFrom),'report.json'),'utf8')) : undefined;
 if (reuseFrom && !['container-search','images','office-rendering'].includes(profile)) throw Error('Reuse is limited to explicit container-query, image recovery, or Office job continuation.');
 await mkdir(out, { mode: 0o700 }); // Never overwrite a first run or reuse its memory.
 const config = await readConfig();
 const report = { profile, startedAt: new Date().toISOString(), revision: process.env.HY_ACCEPTANCE_REVISION || 'working-tree',
-  ...(reuseFrom ? { reuseFrom: resolve(reuseFrom), scope: profile==='office-rendering' ? 'Office continuation retains the original fixture bytes and persisted operation receipts. Unknown recovery requires HY_LIVE_ACCEPT_UNKNOWN=1; production prompts and models are unchanged.' : profile==='images' ? 'Explicit recovery of the first failed image formation; retains successful first observation and embedding.' : 'Query-only continuation; no ingestion/reasoning replay.' } : {}),
+  ...(reuseFrom ? { reuseFrom: resolve(reuseFrom), scope: profile==='office-rendering' ? 'Office continuation retains the original fixture bytes and persisted operation receipts. Unknown recovery requires HY_LIVE_ACCEPT_UNKNOWN=1; Original fixtures and expectations are retained; the acceptance revision identifies the code and prompt version used.' : profile==='images' ? 'Explicit recovery of the first failed image formation; retains successful first observation and embedding.' : 'Query-only continuation; no ingestion/reasoning replay.' } : {}),
   models: Object.fromEntries(Object.entries(config).filter(([k]) => k.endsWith('_MODEL'))),
   semanticReview: { status: 'required', note: 'Inspect first responses against fixture ground truth, including conclusion meaning, native evidence, explicit authority and revision targets. A matching word is not semantic proof.' },
-  checks: [], failures: [], calls: 0, finished: false };
+  checks: [], failures: [], calls: 0, finished: false, ...(previousReport?.recoveries?{recoveries:[...previousReport.recoveries]}:{}) };
 const save = () => writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2), { mode: 0o600 });
 function redact(value, key = '') {
   if (/^(dataBase64|data|image_url)$/.test(key) && typeof value === 'string' && value.length > 512) return `<${value.length} characters>`;
@@ -48,7 +50,7 @@ const transport = async request => {
   return response;
 };
 let runtime;
-const start = () => createRuntime({ config, persistence: join(reuseFrom ? resolve(reuseFrom) : out, 'storage'), port: 0, outboundService: transport });
+const start = () => createRuntime({ config, persistence: join(stateFrom ? resolve(stateFrom) : out, 'storage'), port: 0, outboundService: transport });
 async function api(path, body = {}) {
   const response = await runtime.dispatchFetch(`https://acceptance.test${path}`, { method: 'POST', headers: {
     Authorization: `Bearer ${config.HY_API_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -115,7 +117,7 @@ async function waitJob(path, operationId) {
   let progress, idlePolls=0;
   while (idlePolls < 600) {
     const status = await api(`/${path}/status`, { operationId });
-    const current=JSON.stringify([status.ref,status.phase,status.cursor,status.units]);
+    const current=JSON.stringify([status.ref,status.phase,status.cursor,status.units,report.calls]);
     if(current!==progress){progress=current;idlePolls=0;}else idlePolls++;
     if (status.state === 'complete') return status;
     if (!['queued','running'].includes(status.state)) throw Error(`Job ${operationId}: ${JSON.stringify(status)}`);
@@ -310,7 +312,11 @@ async function officeRenderingCases(){
     if(reuseFrom){try{fixture.bytes=await readFile(join(resolve(reuseFrom),fixture.name));}catch(error){if(error.code!=='ENOENT')throw error;}}
     await writeFile(join(out,fixture.name),fixture.bytes,{mode:0o600});
     let operationId=`office-${index}`;
-    const admitted=await api('/ingest',{operationId,messageRef:fixture.name,sessionRef:'office-rendering',mimeType:fixture.mimeType,dataBase64:Buffer.from(fixture.bytes).toString('base64')});
+    let recovered=previousReport?.recoveries?.find(r=>r.previousOperationId===operationId);
+    while(recovered){operationId=recovered.operationId;recovered=previousReport.recoveries.find(r=>r.previousOperationId===operationId);}
+    const admitted=operationId===`office-${index}`
+      ?await api('/ingest',{operationId,messageRef:fixture.name,sessionRef:'office-rendering',mimeType:fixture.mimeType,dataBase64:Buffer.from(fixture.bytes).toString('base64')})
+      :await api('/document/status',{operationId});
     if(reuseFrom&&['running','unknown'].includes(admitted.state)){
       if(process.env.HY_LIVE_ACCEPT_UNKNOWN!=='1')throw Error('Retained Office operation needs explicit HY_LIVE_ACCEPT_UNKNOWN=1 recovery.');
       const previousOperationId=operationId;operationId+='-explicit-recovery';

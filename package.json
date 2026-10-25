@@ -60,7 +60,8 @@
     "test/live-flac-grounding.mjs",
     "test/live-layout-grounding.mjs",
     "memory/fonts/",
-    "memory/test/office-render-fixtures.mjs"
+    "memory/test/office-render-fixtures.mjs",
+    "test/live-office-measurements.mjs"
   ],
   "dependencies": {
     "@wasm-audio-decoders/flac": "0.2.11",

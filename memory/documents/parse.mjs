@@ -1,3 +1,4 @@
+import {wordMeasurements} from './office-measurements.mjs';
 // Copyright YY. Apache-2.0. Dependencies and evidence boundaries: ./README.md.
 import * as pdfLib from 'pdf-lib';
 import { withPdfBudget } from './pdf-budget.mjs';
@@ -223,7 +224,8 @@ function docx(parts, main, mime, units, totalCoverage) {
   // are deliberately not evaluated into effective Word formatting.
   function property(node) {
     if (!node) return undefined;
-    return { kind: node.local, ...(NS.w.includes(node.uri) ? {} : { namespace: node.uri }), attributes: Object.fromEntries((node.attributes ?? []).map(a =>
+    const measurements=wordMeasurements(node);
+    return { ...(measurements?{measurements}:{}), kind: node.local, ...(NS.w.includes(node.uri) ? {} : { namespace: node.uri }), attributes: Object.fromEntries((node.attributes ?? []).map(a =>
       [!a.uri || NS.w.includes(a.uri) ? a.local : `{${a.uri}}${a.local}`, a.value])),
       ...(node.text !== undefined ? { text: node.text } : {}),
       children: node.children.filter(c => c.local !== '#text').map(property) };

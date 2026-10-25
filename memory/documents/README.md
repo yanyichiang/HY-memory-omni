@@ -39,3 +39,5 @@ Owner 局部纠正不替代全部原生观察：整源重建重新观察 native 
 `office-render.mjs` 在原生单位之后增加派生 PDF 页，使用固定 Reamkit 1.33.1、构建期有界补丁与内置 OFL 字体。`office-rendered-page` 的 `page` 从 1 开始，仅定位这份派生 PDF；原生 PDF 的 `pageIndex` 仍从 0 开始。每页保留 rendering / coverage，字体替换、引擎漏报可能性和非 Office 等价性明确可读。原生结构、原件和渲染页共享一个 provenance root，整源重建、纠正及撤销一起生效。
 
 构建先执行 `prepareOfficeFonts()` 和 `prepareOffice()`，不依赖宿主字体或在线下载。字体缺字、超出有界布局/图像/输出限制会明确拒绝，不悄悄生成不完整的“成功”页面。限制详见 `docs/MEDIA.md`。字体来源与可复现构建见 `memory/fonts/SOURCE.md`；渲染器 MIT 原许可与修改脚本随构建产物保留。渲染报告的空 losses 不代表无损或通过完整 Office 兼容性验收。
+
+已知 Word 数值属性另附 `measurements`：页尺寸/页边距的 twips、显式 dxa 首选表宽/单元格宽度、初始 gridCol 宽度，以及字体半磅值由宿主计算 points/inches，原值、单位和属性类型并存。未知属性、单位或 namespace 保持原样。该转换不解决样式继承，也不把首选宽度当成实际渲染宽度。默认观察聚焦内容及影响语义的格式，完整设置清单留在结构证据；明确查询或重检这些参数时仍可核验。
