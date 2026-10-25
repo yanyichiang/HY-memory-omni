@@ -267,9 +267,9 @@ npm pack
 - 检索返回有界候选集合。没有命中不能证明相关证据不存在；按视频归组也不等于跨片段推理已经得出结论。
 - 跨片段推理事件的时间戳是模型估计；即使结论正确，定位也可能有偏差。新事件标注估时与供模窗口，原件核验使用归档的 `clipRef`。
 - 当前修改粒度是**整个来源重建**，尚未提供单条事实编辑。
-- 音频支持 PCM WAV、MP3、M4A / ADTS 的 AAC-LC、HE-AAC、HE-AACv2、Ogg Opus 和原生 FLAC。AAC / Opus 支持单、双声道，FLAC 保留最多 8 声道；原件保留，新增压缩格式在理解、媒体查询与 embedding 前派生 float32 WAV。小媒体派生上限 8 MiB，长音频每片上限 4 MiB；超限使用 multipart。具体时钟与拒绝条件见[兼容性说明](docs/MEDIA.md)。真实调用已通过 M4A 入库、Opus/AAC 查询及重建撤销；FLAC 查询保留一例漏检，详见[验收记录](docs/ACCEPTANCE.md)。
+- 音频支持 PCM WAV、MP3、M4A / ADTS 的 AAC-LC、HE-AAC、HE-AACv2、Ogg Opus 和原生 FLAC。AAC / Opus 支持单、双声道，FLAC 保留最多 8 声道；原件保留，新增压缩格式在理解、媒体查询与 embedding 前派生 float32 WAV。小媒体派生上限 8 MiB，长音频每片上限 4 MiB；超限使用 multipart。具体时钟与拒绝条件见[兼容性说明](docs/MEDIA.md)。真实调用已通过 M4A 入库、Opus/AAC 查询及重建撤销；历史 FLAC 漏检样本在当前独立查询核验路径复测通过，原失败仍保留，详见[验收记录](docs/ACCEPTANCE.md)。
 - 视频还支持受限的 WebM / MKV：AVC、HEVC、VP9、AV1 视频，至多一条 Opus、AAC 或 MP3 音轨。保留原容器；Opus / AAC 用已有 WASM 解码并按样本裁剪为 float32 PCM，与原视频包封装为 MOV 供理解、原生查询及 embedding，MP3 保留压缩包。沿用短视频、分段任务和整个来源重建 / 撤销入口。PCM 展开可能使小原件超过 8 MiB，届时使用 `/video/upload`；固定切片超限需缩短 `seconds`。当前逐片从源起点扫描，AAC 完整解码、仅保存窗口；格式接受不代表完整真实语义验收通过，详见[兼容性说明](docs/MEDIA.md)。
-- PDF / DOCX / XLSX / PPTX 保留原件，并异步形成原生证据单位：PDF 原页视觉、PPTX 幻灯片形状，DOCX 段表与图锚，XLSX 工作表区域、公式/缓存、日期系统与图锚。结构和嵌入图片并存，不把 Office 纯文本化冒充版面；裁剪图片保留 full-asset / 未渲染标记，不保证打印渲染或完整 Office 兼容。根只在全部单位完成后发布；整个来源重建、撤销约束传播到所有子单位。按原件分组不等于跨页推理，当前没有文档跨页推理接口。每次接纳最多 8 MiB / 128 个原生单位（纠正另加一个 Owner 注释单位），不是资料库总容量上限；查询、PDF 解码及 ZIP 展开另有[明确预算](docs/MEDIA.md#pdf-and-office-documents)。真实模型验收状态见[验收记录](docs/ACCEPTANCE.md)。
+- PDF / DOCX / XLSX / PPTX 保留原件，并异步形成原生证据单位：PDF 原页视觉、PPTX 幻灯片形状，DOCX 段表与图锚，XLSX 工作表区域、公式/缓存、日期系统与图锚。结构和嵌入图片并存，并保留文字格式、样式来源、隐藏标记与段表/单元格/形状布局属性；未计算的样式继承有明确标记。裁剪图片保留 full-asset / 未渲染标记，不保证打印渲染或完整 Office 兼容。根只在全部单位完成后发布；整个来源重建、撤销约束传播到所有子单位。按原件分组不等于跨页推理，当前没有文档跨页推理接口。每次接纳最多 8 MiB / 128 个原生单位（纠正另加一个 Owner 注释单位），不是资料库总容量上限；查询、PDF 解码及 ZIP 展开另有[明确预算](docs/MEDIA.md#pdf-and-office-documents)。真实模型验收状态见[验收记录](docs/ACCEPTANCE.md)。
 - 文档局部纠正追加绑定当前原件根的 Owner 注释，原生单位仍重新观察，不把同一句纠正复制成每页事实；确定空单位保留可读定位且不调用模型或形成命题。
 - 普通媒体写入上限为原文件 8 MiB；音频最长 180 秒、短视频最长 120 秒；媒体查询上限为原文件 2 MiB。长视频和长音频使用各自的任务接口，支持固定/动态切分、按原件分组和显式跨片推理。`npm run inspect -- FILE` 可先检查格式；见[兼容性说明](docs/MEDIA.md)与 [API 文档](docs/API.md)。
 
