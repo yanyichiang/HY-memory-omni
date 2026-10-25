@@ -98,6 +98,14 @@ export class CloudflareKnowledgeModels implements KnowledgeModels {
           if (!contexts.some(context => context.includes(result.effectiveTime!))) fail('knowledge_time_binding_invalid');
         }
       } else if (Object.hasOwn(row, 'revisionKind') || Object.hasOwn(row, 'effectiveTime') || Object.hasOwn(row, 'superseded') || Object.hasOwn(row, 'effectiveAt')) fail('knowledge_response_invalid');
+      if (kind === 'same') {
+        const uncovered = (['conditions', 'validTime'] as const).filter(field =>
+          Boolean(pair.left[field].trim()) !== Boolean(pair.right[field].trim()));
+        if (uncovered.length) {
+          result.kind = 'uncertain';
+          result.reason += ` Qualification coverage is incomplete for ${uncovered.join(' and ')}: one endpoint is empty and the other is nonempty. Relationship equivalence is unproven; entity identity remains as supplied.`;
+        }
+      }
       return result;
     });
     if (seen.size !== requested.size) fail('knowledge_relation_incomplete');

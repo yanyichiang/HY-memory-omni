@@ -4,7 +4,7 @@ Run `npm run build`, then `npm run inspect -- /path/to/recording`. This local co
 
 | Input | Accepted | Prepare unsupported exports |
 | --- | --- | --- |
-| Images | PNG, JPEG, WebP, up to 8 MiB original bytes | Export one supported still image |
+| Images | PNG, JPEG, WebP; bounded HEIC/HEIF/AVIF and GIF, up to 8 MiB original bytes | See image representation limits below |
 | Audio | PCM WAV (u8/s16/s24/s32/f32, little-endian RIFF), MP3; M4A/ADTS AAC-LC, HE-AAC, HE-AACv2; Ogg Opus; native FLAC | See the codec limits below; RF64, compressed WAV and other Ogg codecs are not accepted |
 | Video | MP4/QuickTime with AVC, HEVC, AV1 or VP9 and optional AAC/MP3 soundtrack; restricted WebM/Matroska with the same video codecs and optional Opus/AAC/MP3 | Select one video track and at most one soundtrack; export timestamps starting at zero |
 
@@ -72,3 +72,15 @@ Both kinds preserve the original reference, logical interval, actual excerpt int
 ## Audio observation precision
 
 Perception identifies exact digital silence from the selected decoded PCM samples before describing audio. Every sample must represent zero; there is no volume threshold. The retained original is unchanged. The check uses the supplied decoded samples; new codec derivatives retain float32 values rather than quantizing them to PCM16. A purely measured observation is attributed to `pcm-sample-inspection`; mixed measured/model observations name both. Nonzero audio continues through the configured native model. This does not certify arbitrary speech/sound recognition or reasoning timestamps. Reasoning events expose model estimates and the actual supplied media window; use the archived event's `clipRef` to inspect original evidence.
+
+## HEIC, AVIF and GIF
+
+`/ingest` and native-media `/search` accept `image/heic`, `image/heif`, `image/avif` and `image/gif`. The original bytes remain stored and returned by `/read`. Static provider derivatives are PNG; animations are H264 MP4, with no invented audio. This conversion runs inside Workers using the included static WASM and JavaScript codecs. Normal setup needs no native SDK or external conversion service.
+
+`/read.representation` records original/output dimensions and any downsampling. Animation `timeline.animation` also records source frame indices, exact source ticks/delays, one-cycle duration, raw repetitions, alpha matte, color limitations and the output time mapping. Animated grounding selects explicit source-frame IDs. The service maps those IDs to decoded source intervals and returns `basis: "source-frame"`, integer covering bounds and exact `frames` coordinates. Frame selection remains a model judgment; the clock mapping is deterministic. Loops are not expanded. Zero-delay frames influence composition but have no displayed interval; all-zero animations fail explicitly.
+
+The service accepts a single HEIF still item or a single visual sequence. Multi-item collections, additional tracks and complex edit lists are rejected instead of choosing one item silently. Ordinary stills/sequence decode frames are bounded to 8 million pixels and side 8192. Independent opaque 8-bit SDR HEIC grids may reach 16 million original pixels, with at most 256 independently decoded tiles of at most 262144 pixels each; the provider output is sampled to at most 4 million pixels. Large-grid alpha, ICC, HDR and geometric transforms are unsupported. Original dimensions and actual sampling ratios remain available. Small-image libheif transforms are retained, but RGBA8 conversion does not promise original HDR/wide-gamut color fidelity.
+
+GIF canvases are bounded to 1,048,576 pixels, side 4096, 128 frames and 32 MiB cumulative decoded work. The animation encoder accepts a coded canvas of at most 1,048,576 pixels, side 2048, at most 128 frames, 120 seconds and 8 MiB output. It uses white matte, YUV420 and edge padding; these are disclosed derivatives. Unknown GIF applications, plain-text blocks and user-interaction waits are rejected. Long animation uploads are not routed through `/video/upload`; export an explicitly timed video for that interface.
+
+Raw source coordinates are authoritative. A sampled/converted representation can omit fine detail; query cues from animations are observed separately before source grounding, with the same disclosed lossiness as audio/video cues. Source correction, reinspection and revocation retain the existing whole-source version rules.

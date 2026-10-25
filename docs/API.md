@@ -6,6 +6,8 @@ The following examples use the `memory(path, body)` helper from the README. Pres
 
 ## Images, audio and short videos
 
+Image MIME types include PNG/JPEG/WebP and bounded HEIC/HEIF/AVIF/GIF. Animated images retain `timeline.animation`; `/read.representation` describes derived dimensions, timing and color/matte changes. Animation search groundings return `basis: "source-frame"` and `frames: {startIndex,endIndex,startMs,endMs}`. These exact decoded boundaries are selected by the model; integer `startMs/endMs` cover them for the existing read API. Zero-hold frames have no displayed interval. See [media limits](MEDIA.md#heic-avif-and-gif).
+
 ```js
 const bytes = await readFile('example.png');
 const saved = await memory('/ingest', {

@@ -51,13 +51,15 @@
     "test/live-fixtures/",
     "memory/test/fixtures/tone.wav",
     "memory/test/fixtures/synthetic-meeting-m42.mp4",
-    "npm-shrinkwrap.json"
+    "npm-shrinkwrap.json",
+    "test/live-image-grounding.mjs"
   ],
   "dependencies": {
     "@wasm-audio-decoders/flac": "0.2.11",
     "esbuild": "0.28.1",
-    "miniflare": "5.20261012.0-beta",
+    "fast-png": "8.0.0",
     "mediabunny": "1.62.1",
+    "miniflare": "5.20261012.0-beta",
     "mpg123-decoder": "1.0.3",
     "opus-decoder": "0.7.12",
     "wrangler": "4.151.0"

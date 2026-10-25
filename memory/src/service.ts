@@ -11,11 +11,18 @@ import type { KnowledgeModels } from './knowledge-types.js';
 /** Media authority. Hy computes a candidate snapshot; only this transaction domain publishes it. */
 export interface Principal { ownerRef: string; scopeRef: 'personal' }
 export interface SourceRef { sourceId: string; revision: number; mediaRef: string }
-export interface Perception { model: string; configKey: string; kind: 'text' | 'image' | 'audio' | 'video'; text: string }
-export interface Timeline { durationMs: number; hasAudio: boolean; hasVideo: boolean }
+export interface ImageRepresentation {
+  inputMimeType:string;kind:'still'|'animation';originalWidth?:number;originalHeight?:number;outputWidth?:number;outputHeight?:number;
+  frames:{index:number;startMs:number;endMs:number;rawDelayCentiseconds?:number|null;disposal?:number;startTicks?:string;durationTicks?:string}[];
+  itemIds?:number[];loopCount?:number;repetitions?:number;loopMeaning?:string;timescale?:number;background?:unknown;pixelAspectRatioRaw?:number;
+  sourceDepth?:number|null;sourceIccBytes?:number|null;matte?:'white';colorLimitation:string;mapping?:unknown;downsample?:unknown;
+}
+export interface Perception { model: string; configKey: string; kind: 'text' | 'image' | 'audio' | 'video'; text: string; representation?:ImageRepresentation }
+export interface Timeline { durationMs: number; hasAudio: boolean; hasVideo: boolean; animation?:ImageRepresentation }
 export interface TimeRange { startMs: number; endMs: number }
 export interface Grounding extends TimeRange {
-  text: string; model: string; configKey: string; basis: 'model-estimate' | 'sample-window'; modalities: ('audio' | 'video')[];
+  text: string; model: string; configKey: string; basis: 'model-estimate' | 'sample-window' | 'source-frame';
+  frames?: {startIndex:number;endIndex:number;startMs:number;endMs:number}; modalities: ('audio' | 'video')[];
 }
 export interface TemporalMatch { intervals: Grounding[]; correctionRelevant: boolean }
 export interface ImageMatch { matches: boolean; text: string; correctionRelevant: boolean; model: string; configKey: string }
@@ -23,7 +30,7 @@ export interface NodeRow { payload: Record<string, unknown>; embedding: number[]
 export interface Vector { model: string; values: number[]; modalities?: ('text' | 'image' | 'audio' | 'video')[] }
 export interface Source {
   ref: SourceRef; messageRef: string; sessionRef: string; mimeType: string; key: string;
-  state: 'pending' | 'active' | 'deleted' | 'revoked'; perception?: Perception;
+  state: 'pending' | 'active' | 'deleted' | 'revoked'; perception?: Perception; representation?:ImageRepresentation;
   vector?: Vector; correction?: string; cleanupPending?: boolean; timeline?: Timeline;
   clip?: { original: SourceRef; logical: TimeRange; actual: TimeRange; offsetMs: number };
   // Historical serialized plan key shared by long audio/video roots; MIME and timeline identify modality.
@@ -73,7 +80,7 @@ export function sourceRef(value: unknown): SourceRef {
 }
 function mediaType(value: unknown): string {
   const type = text(value, 80);
-  if (!['image/png', 'image/jpeg', 'image/webp', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac', 'video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'].includes(type)) throw new MemoryError('unsupported_media', 415);
+  if (!['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif', 'image/avif', 'image/gif', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac', 'video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'].includes(type)) throw new MemoryError('unsupported_media', 415);
   return type;
 }
 export function timeRange(value: unknown, timeline: Timeline): TimeRange {
@@ -92,11 +99,16 @@ function checkedGroundings(value: Grounding[], timeline: Timeline): Grounding[] 
     let range: TimeRange;
     try { range = timeRange({ startMs: g.startMs, endMs: g.endMs }, timeline); }
     catch { throw new MemoryError('grounding_range_invalid', 502); }
-    if ((g.basis !== 'model-estimate' && g.basis !== 'sample-window') || !Array.isArray(g.modalities) || !g.modalities.length || g.modalities.length > 2 ||
+    if ((g.basis !== 'model-estimate' && g.basis !== 'sample-window' && g.basis !== 'source-frame')
+        || g.basis === 'source-frame' && !timeline.animation || !Array.isArray(g.modalities) || !g.modalities.length || g.modalities.length > 2 ||
         (g.basis === 'sample-window' && (timeline.hasVideo || g.modalities.length !== 1 || g.modalities[0] !== 'audio')) ||
         new Set(g.modalities).size !== g.modalities.length || g.modalities.some(m => (m !== 'audio' && m !== 'video') ||
           (m === 'audio' && !timeline.hasAudio) || (m === 'video' && !timeline.hasVideo))) throw new MemoryError('grounding_modality_invalid', 502);
-    return { ...range, text: text(g.text), model: text(g.model, 200), configKey: text(g.configKey, 200), basis: g.basis, modalities: g.modalities as ('audio' | 'video')[] };
+    if (g.basis === 'source-frame') {
+      const frames=record(g.frames), first=timeline.animation!.frames.find(f=>f.index===frames.startIndex),last=timeline.animation!.frames.find(f=>f.index===frames.endIndex);
+      if(!first||!last||first.endMs<=first.startMs||last.endMs<=last.startMs||first.index>last.index||first.startMs!==frames.startMs||last.endMs!==frames.endMs||range.startMs!==Math.floor(first.startMs)||range.endMs!==Math.ceil(last.endMs))throw new MemoryError('animation_grounding_invalid',502);
+    }
+    return { ...range, ...(g.basis==='source-frame'?{frames:g.frames as NonNullable<Grounding['frames']>}:{}), text: text(g.text), model: text(g.model, 200), configKey: text(g.configKey, 200), basis: g.basis, modalities: g.modalities as ('audio' | 'video')[] };
   });
 }
 function refsOf(payload: Record<string, unknown>): SourceRef[] {
@@ -290,7 +302,7 @@ export class MemoryService {
     if (perception.kind !== source.mimeType.split('/')[0]) throw new MemoryError('perception_kind_invalid', 502);
     if (source.correction === undefined && perception.model === 'owner-correction') throw new MemoryError('invalid_perception_authority', 502);
     await this.source(source.ref, true, new Set(), stagingRoot);
-    source = { ...source, perception };
+    source = { ...source, perception, ...(perception.representation ? {representation:perception.representation} : {}) };
     await this.saveSource(source);
     await this.stage(operationId, source.ref, 'embedding');
     const vector = source.vector ?? await this.models.embed(source.mimeType === 'text/plain' ? { text: new TextDecoder().decode(bytes) } : { mimeType: source.mimeType, bytes });
@@ -300,7 +312,8 @@ export class MemoryService {
     await this.saveSource(source);
     await this.stage(operationId, source.ref, 'formation');
     const output = record(await this.models.compute({ operation: 'write', principal: this.owner, requestId: operationId,
-      sessionRef: source.sessionRef, nodes, content: perception.text, sourceRef: source.ref, perception }));
+      sessionRef: source.sessionRef, nodes, content: perception.text, sourceRef: source.ref,
+      perception: {model:perception.model,configKey:perception.configKey,kind:perception.kind,text:perception.text} }));
     if (output.success !== true) throw new MemoryError('hy_formation_failed', 502);
     const staged = nodeRows(output.nodes, this.owner);
     for (const node of staged) for (const ref of refsOf(node.payload)) {
@@ -344,10 +357,10 @@ export class MemoryService {
     const bytes = await this.blobs.get(source.key);
     await this.source(ref); // Revocation can run while R2 is awaited.
     if (!bytes) throw new MemoryError('original_missing', 502);
-    return { ref, mimeType: source.mimeType, dataBase64: encode(bytes), perceptionText: source.perception?.text ?? '',
+    return { ref, mimeType: source.mimeType, dataBase64: encode(bytes), perceptionText: source.perception?.text ?? '', ...(source.representation ? {representation:source.representation} : {}),
       knowledge: await this.knowledge([ref.sourceId]), ...(source.clip ? { clip: source.clip } : {}), ...(source.verification ? { verification: source.verification } : {}),
       provenance: { roots: await this.roots(source), derivedFrom: source.derivedFrom ?? [], independence: 'not-established' as const },
-      parser: source.perception && { model: source.perception.model, configKey: source.perception.configKey, kind: source.perception.kind },
+      parser: source.perception && { model: source.perception.model, configKey: source.perception.configKey, kind: source.perception.kind, ...(source.perception.representation ? {representation:source.perception.representation} : {}) },
       ...(source.timeline ? { timeline: source.timeline, originalIsFullFile: true, ...(selection ? { selection } : {}) } : {}) };
   }
   async search(input: Record<string, unknown>) {
@@ -358,7 +371,7 @@ export class MemoryService {
     if (!Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 20) throw new MemoryError('invalid_limit', 400);
     // Query media stays smaller than stored originals so two native inputs fit in one Worker request.
     const queryMedia = media === undefined ? undefined : { mimeType: mediaType(media.mimeType), bytes: decode(media.dataBase64, 2 * 1024 * 1024) };
-    if (queryMedia) await inspectMedia(queryMedia.mimeType, queryMedia.bytes);
+    const queryTimeline = queryMedia ? await inspectMedia(queryMedia.mimeType, queryMedia.bytes) : undefined;
     const revision = await this.revision();
     const output = query === undefined ? { success: true, memories: [] } : record(await this.models.compute({ operation: 'search', principal: this.owner, requestId: crypto.randomUUID(), sessionRef,
       readStore: { revision }, query, limit: 20 }));
@@ -385,7 +398,7 @@ export class MemoryService {
       const existing = [...items.values()].find(item => item.refs.some(r => r.sourceId === ref.sourceId));
       if (existing) existing.score += 1 / (60 + rank + 1);
       else items.set(ref.sourceId, { id: ref.sourceId, text: source.perception?.text ?? 'Media original', refs: [ref],
-        score: 1 / (60 + rank + 1), ...(source.perception ? { perception: { model: source.perception.model, configKey: source.perception.configKey, kind: source.perception.kind } } : {}) });
+        score: 1 / (60 + rank + 1), ...(source.perception ? { perception: { model: source.perception.model, configKey: source.perception.configKey, kind: source.perception.kind, ...(source.perception.representation ? {representation:source.perception.representation} : {}) } } : {}) });
     }
     // Candidate and presentation limits are distinct. Rejected originals free a result slot.
     const ranked = [...items.values()].sort((a, b) => b.score - a.score);
@@ -393,7 +406,7 @@ export class MemoryService {
     const results = [];
     let examinedCandidates = 0;
     const limitations = ['Semantic candidate retrieval is not exhaustive; no returned match does not prove absence.', 'Text keyword scores use a bounded posting candidate corpus; persisted vector search uses a bounded tree traversal.'];
-    if (queryMedia && !queryMedia.mimeType.startsWith('image/')) limitations.push('Audio/video query cues are observed separately before source grounding; that model interpretation may omit query details and is not source evidence.');
+    if (queryMedia && (!queryMedia.mimeType.startsWith('image/') || queryTimeline)) limitations.push('Audio/video query cues are observed separately before source grounding; that model interpretation may omit query details and is not source evidence.');
     if (output.retrievalCoverage !== undefined && record(output.retrievalCoverage).exhaustive !== true) limitations.push('Hy Reader callbacks report incomplete candidate coverage.');
     for (const { score: _score, ...item } of ranked) {
       if (results.length >= Number(limit) || examinedCandidates >= 20) break;
@@ -409,7 +422,7 @@ export class MemoryService {
       let temporal = false, unmatched = false, corrected = false;
       for (const ref of item.refs) {
         const source = await this.source(ref), key = JSON.stringify(ref);
-        const isImage = source.mimeType.startsWith('image/');
+        const isImage = source.mimeType.startsWith('image/') && !source.timeline;
         if (!source.timeline && !isImage) continue;
         temporal ||= !!source.timeline;
         if (!grounded.has(key) && !images.has(key)) {
@@ -428,7 +441,7 @@ export class MemoryService {
             const match = await this.models.locate({ ...input, timeline: source.timeline! });
             if (typeof match.correctionRelevant !== 'boolean' || match.correctionRelevant && source.correction === undefined) throw new MemoryError('grounding_correction_invalid', 502);
             grounded.set(key, { intervals: checkedGroundings(match.intervals, source.timeline!), correctionRelevant: match.correctionRelevant });
-            limitations.push(source.timeline!.hasVideo
+            limitations.push(source.timeline!.animation ? 'Animation frame selection is model-inferred; returned frame boundaries come from decoded source timing. Zero-hold frames have no displayed interval.' : source.timeline!.hasVideo
               ? source.timeline!.hasAudio && !source.vector?.modalities?.includes('audio')
                 ? 'This older video vector omits its soundtrack; reinspection rebuilds its native index. Video frames are sampled and returned times are model estimates.'
                 : 'Video candidate vectors sample frames; returned video times are model estimates.'

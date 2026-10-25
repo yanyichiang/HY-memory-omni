@@ -1,0 +1,2 @@
+export interface AnimationFrame { rgba:Uint8Array|Uint8ClampedArray;width:number;height:number;index:number;startMs:number;endMs:number }
+export function encodeAnimation(frames:AsyncIterable<AnimationFrame>, options?:{maxBytes?:number}):Promise<{bytes:Uint8Array;mimeType:'video/mp4';durationMs:number;frames:{index:number;startMs:number;endMs:number}[];width:number;height:number;originalWidth:number;originalHeight:number;matte:'white';colorLimitation:string;mapping:{muxTimeResolution:number;muxToleranceMs:number;zeroDurationFrameIndices:number[];frames:unknown[]}} >;

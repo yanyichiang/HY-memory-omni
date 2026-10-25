@@ -5,15 +5,15 @@ import { readConfig } from '../scripts/config.mjs';
 import { createRuntime } from '../scripts/runtime.mjs';
 
 const profile = process.env.HY_LIVE_PROFILE || 'all';
-if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats, containers, container-search or all.');
+if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'images', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats, containers, container-search, images or all.');
 if (!process.env.HY_LIVE_OUTPUT) throw Error('Set HY_LIVE_OUTPUT to a new private results directory. This command calls your configured live models.');
 const out = resolve(process.env.HY_LIVE_OUTPUT);
 const reuseFrom = process.env.HY_LIVE_REUSE_FROM;
-if (reuseFrom && profile !== 'container-search') throw Error('Reuse is limited to the query-only container-search continuation.');
+if (reuseFrom && !['container-search','images'].includes(profile)) throw Error('Reuse is limited to explicit container-query continuation or the recorded image formation recovery.');
 await mkdir(out, { mode: 0o700 }); // Never overwrite a first run or reuse its memory.
 const config = await readConfig();
 const report = { profile, startedAt: new Date().toISOString(), revision: process.env.HY_ACCEPTANCE_REVISION || 'working-tree',
-  ...(reuseFrom ? { reuseFrom: resolve(reuseFrom), scope: 'Query-only continuation; no ingestion/reasoning replay.' } : {}),
+  ...(reuseFrom ? { reuseFrom: resolve(reuseFrom), scope: profile==='images' ? 'Explicit recovery of the first failed image formation; retains successful first observation and embedding.' : 'Query-only continuation; no ingestion/reasoning replay.' } : {}),
   models: Object.fromEntries(Object.entries(config).filter(([k]) => k.endsWith('_MODEL'))),
   semanticReview: { status: 'required', note: 'Inspect first responses against fixture ground truth, including conclusion meaning, native evidence, explicit authority and revision targets. A matching word is not semantic proof.' },
   checks: [], failures: [], calls: 0, finished: false };
@@ -240,6 +240,31 @@ async function containerCases() {
   check('revoked MKV absent from grouped search', !after.videos?.some(v => v.ref.sourceId === source('container')));
   await save();
 }
+async function imageFormatCases() {
+  const still = await readFile(new URL('./live-fixtures/C.avif', import.meta.url));
+  const animated = await readFile(new URL('./live-fixtures/revision.gif', import.meta.url));
+  if(reuseFrom) {
+    const previous=await api('/operation',{operationId:'ingest-avif-notice'});
+    if(previous.state!=='failed'||previous.stage!=='formation') throw Error('Image recovery requires the recorded deterministic formation failure.');
+    const recovered=await api('/recover',{previousOperationId:'ingest-avif-notice',operationId:'recover-avif-notice'});
+    refs['avif-notice']=recovered.ref;
+  } else await ingest('avif-notice', 'image/avif', still);
+  await ingest('animated-notices', 'image/gif', animated);
+  const a=await api('/read',{ref:refs['avif-notice']}), g=await api('/read',{ref:refs['animated-notices']});
+  check('AVIF original retained with explicit PNG representation', a.mimeType==='image/avif' && Buffer.from(a.dataBase64,'base64').equals(still) && a.representation?.kind==='still');
+  check('GIF original and source cycle retained', g.mimeType==='image/gif' && Buffer.from(g.dataBase64,'base64').equals(animated) && g.timeline?.durationMs===6000 && g.timeline.animation.frames.length===2 && g.timeline.animation.frames[1].startMs===3000 && g.timeline.animation.loopCount===0);
+  const nativeStill=await api('/search',{sessionRef:'avif-query',media:{mimeType:'image/avif',dataBase64:still.toString('base64')}});
+  check('native AVIF query retrieves its own meeting', nativeStill.items.some(i=>i.refs.some(r=>r.sourceId===source('avif-notice'))) && !nativeStill.items.some(i=>i.refs.some(r=>r.sourceId===source('animated-notices'))));
+  const nativeAnimation=await api('/search',{sessionRef:'gif-query',media:{mimeType:'image/gif',dataBase64:animated.toString('base64')}});
+  check('native GIF query grounds its own timeline', nativeAnimation.items.some(i=>i.groundings?.some(g=>g.ref.sourceId===source('animated-notices')&&g.startMs>=0&&g.endMs<=6000)) && !nativeAnimation.items.some(i=>i.refs.some(r=>r.sourceId===source('avif-notice'))));
+  const old=refs['avif-notice'];
+  const rebuilt=await api('/reinspect',{ref:old,operationId:'reinspect-avif',question:'Recheck the meeting identifier, scheduled date and room from the retained original.'});
+  refs['avif-notice']=rebuilt.ref;
+  check('AVIF reinspection advances version and preserves original', rebuilt.ref.revision===old.revision+1 && !(await api('/validate',{refs:[old]})).valid && Buffer.from((await api('/read',{ref:rebuilt.ref})).dataBase64,'base64').equals(still));
+  await api('/revoke',{ref:refs['animated-notices'],operationId:'revoke-gif'});
+  check('GIF source revoked', !(await api('/validate',{refs:[refs['animated-notices']]})).valid);
+  await save();
+}
 try {
   runtime = await start();
   check('unauthenticated API rejected', (await runtime.dispatchFetch('https://acceptance.test/revision', { method: 'POST', headers: { 'Content-Type':'application/json' }, body:'{}' })).status === 401);
@@ -249,6 +274,7 @@ try {
   if (profile === 'formats') await formatCases();
   if (profile === 'containers') await containerCases();
   if (profile === 'container-search') await containerSearchCases();
+  if (profile === 'images') await imageFormatCases();
   report.finished = true;
 } catch (error) {
   report.failures.push(error.message); report.error = error.message;

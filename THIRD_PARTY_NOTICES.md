@@ -14,7 +14,7 @@ HY-memory-omni original code and documentation are Copyright 2026 YY and license
 
 ## Media dependencies
 
-These packages are declared dependencies, installed by the recipient. They are not copied into the clean source tree. Their licenses continue to apply if they are later included in generated output.
+The packages in this table are declared dependencies installed by the recipient. The separately documented codec sources and binaries below are included in the source tree. Their licenses continue to apply if they are later included in generated output.
 
 | Component | Version | License | Attribution and source |
 | --- | --- | --- | --- |
@@ -53,7 +53,7 @@ The media in `memory/test/fixtures/` and `test/live-fixtures/` are synthetic pro
 
 ## Building versus redistributing an executable
 
-The current deliverable contains application source plus the separately documented AAC decoder above. No `node_modules`, installed Python environment, generated npm decoder WASM, Worker bundle, model weights, or production data are included.
+The current deliverable contains application source plus the separately documented AAC, HEIF/AVIF and animation codec modules. No `node_modules`, installed Python environment, generated npm decoder WASM, Worker bundle, model weights, or production data are included.
 
 Before distributing a built bundle, container, installed environment, or decoder WASM (including privately to friends), inspect the actual included artifacts and preserve their notices. Specifically:
 
@@ -63,3 +63,11 @@ Before distributing a built bundle, container, installed environment, or decoder
 4. Inventory all actually bundled transitive npm/Python/native components and carry their required notices and source obligations. The source-only inventory above is not a binary-release clearance.
 
 The authoritative terms are the component license texts. The project license does not add a restriction on rights granted by those licenses.
+
+## Image codecs and corresponding source
+
+`memory/codecs/heif/` includes libheif 1.23.6 and libde265 1.0.18 (LGPL-3.0-or-later), AOM 3.15.1 (BSD-2-Clause and AOM PATENTS), the project bridge, Emscripten 4.0.7 glue and a static decoder WASM. Complete corresponding library source archives, local patches, runtime notices and an offline rebuild/relink script accompany the binary. See its README and licenses directory. Recipients may modify/replace the libraries and debug such modifications; retain these materials in redistribution.
+
+`memory/codecs/gif/` adapts gifuct-js 2.1.2 (MIT); original attribution, modified preferred source and patch are included. `memory/codecs/animation/` includes minih264 at `b0baea7a80ef9d12da97301dd1099b8791b5ba43` (CC0), its complete header/bridge/build inputs and the bounded encoder WASM. Emscripten runtime notices reside under the HEIF codec directory and are copied into build output with all codec materials.
+
+PNG derivatives use fast-png 8.0.0 (MIT), installed from the pinned package, with fflate and iobuffer as declared transitive dependencies. These codecs do not relicense the application or original media under a common blanket license.
