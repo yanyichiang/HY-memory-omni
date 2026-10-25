@@ -13,6 +13,7 @@ The intended deliverable is a reusable, self-hosted open-source memory service f
 - For this development environment, heavy installation/build/full tests run on the authorized home machine; edit/light checks locally. Before Cloudflare resource work, establish project ownership and inspect every binding.
 - Commit author and committer for this release repository: YY, using a non-identifying email. Do not rewrite upstream history or strip original copyright.
 - Format expansion order approved by Owner: M4A/AAC, Ogg/Opus and FLAC; then WebM/MKV; then HEIC/AVIF/GIF; then PDF/Office. Preserve original binary evidence, sample/frame/page coordinates and derived representations. Animated inputs must retain their timeline; documents must retain page, image and layout relationships. Supporting a MIME label alone does not establish model or retrieval support.
+- Office evidence uses native structure, as approved by Owner: DOCX sections/paragraphs/tables/drawing anchors and XLSX sheets/cell ranges/image anchors. Preserve their relationships and original binary; do not label these coordinates as Word/Excel print pages. PDF retains original page numbers and PPTX retains slide numbers.
 
 ## Documentation
 

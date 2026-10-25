@@ -267,6 +267,7 @@ npm pack
 - 跨片段推理事件的时间戳是模型估计；即使结论正确，定位也可能有偏差。新事件标注估时与供模窗口，原件核验使用归档的 `clipRef`。
 - 当前修改粒度是**整个来源重建**，尚未提供单条事实编辑。
 - 音频支持 PCM WAV、MP3、M4A / ADTS 的 AAC-LC、HE-AAC、HE-AACv2、Ogg Opus 和原生 FLAC。AAC / Opus 支持单、双声道，FLAC 保留最多 8 声道；原件保留，新增压缩格式在理解、媒体查询与 embedding 前派生 float32 WAV。小媒体派生上限 8 MiB，长音频每片上限 4 MiB；超限使用 multipart。具体时钟与拒绝条件见[兼容性说明](docs/MEDIA.md)。真实调用已通过 M4A 入库、Opus/AAC 查询及重建撤销；FLAC 查询保留一例漏检，详见[验收记录](docs/ACCEPTANCE.md)。
+- 视频还支持受限的 WebM / MKV：AVC、HEVC、VP9、AV1 视频，至多一条 Opus、AAC 或 MP3 音轨。保留原容器；Opus / AAC 用已有 WASM 解码并按样本裁剪为 float32 PCM，与原视频包封装为 MOV 供理解、原生查询及 embedding，MP3 保留压缩包。沿用短视频、分段任务和整个来源重建 / 撤销入口。PCM 展开可能使小原件超过 8 MiB，届时使用 `/video/upload`；固定切片超限需缩短 `seconds`。当前逐片从源起点扫描，AAC 完整解码、仅保存窗口；格式接受不代表完整真实语义验收通过，详见[兼容性说明](docs/MEDIA.md)。
 - 普通媒体写入上限为原文件 8 MiB；音频最长 180 秒、短视频最长 120 秒；媒体查询上限为原文件 2 MiB。长视频和长音频使用各自的任务接口，支持固定/动态切分、按原件分组和显式跨片推理。`npm run inspect -- FILE` 可先检查格式；见[兼容性说明](docs/MEDIA.md)与 [API 文档](docs/API.md)。
 
 ## 文档与贡献

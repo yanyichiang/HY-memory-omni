@@ -1,11 +1,20 @@
 import { BufferSource, EncodedPacketSink, Input, MP3, MP4, QTFF, WAVE } from 'mediabunny';
 import { MemoryError, type Timeline } from './service.js';
 import { inspectInlineAudio, isExtendedAudio } from './native-audio.js';
+import { isMatroska, inspectMatroskaVideo, sliceMatroskaVideo } from './matroska-video.js';
+import { videoSoundtrack } from './video-soundtrack.js';
 
 /** Inspect container/packets and, for extended audio, decoded sample clocks. No network or key lookup. */
 export async function inspectMedia(mimeType: string, bytes: Uint8Array): Promise<Timeline | undefined> {
   if (mimeType.startsWith('image/')) return undefined;
   if (isExtendedAudio(mimeType)) return inspectInlineAudio(mimeType, bytes);
+  if (isMatroska(mimeType)) {
+    const timeline = await inspectMatroskaVideo(mimeType, { size: bytes.length, read: async (a, n) => bytes.subarray(a, a + n) });
+    if (timeline.durationMs > 120000) throw new MemoryError('media_duration_exceeded', 413);
+    try { await sliceMatroskaVideo(mimeType, { size: bytes.length, read: async (a, n) => bytes.subarray(a, a + n) }, { startMs: 0, endMs: timeline.durationMs }); }
+    catch (error) { if (error instanceof MemoryError && error.code === 'media_slice_too_large') throw new MemoryError('media_inline_expansion_exceeded', 413); throw error; }
+    return timeline;
+  }
   const format = mimeType === 'video/mp4' ? MP4 : mimeType === 'video/quicktime' ? QTFF
     : mimeType === 'audio/mpeg' ? MP3 : mimeType === 'audio/wav' ? WAVE : undefined;
   if (!format) throw new MemoryError('media_type_unsupported', 415);
@@ -41,6 +50,10 @@ export async function inspectMedia(mimeType: string, bytes: Uint8Array): Promise
       duration = Math.max(duration, end);
     }
     if (duration > (video ? 120 : 180)) throw new MemoryError('media_duration_exceeded', 413);
+    if (video && audios.length) {
+      try { await videoSoundtrack(mimeType, bytes); }
+      catch (error) { if (error instanceof MemoryError && error.code === 'soundtrack_size_limit') throw new MemoryError('media_inline_expansion_exceeded', 413); throw error; }
+    }
     return { durationMs: Math.ceil(duration * 1000), hasAudio: audios.length === 1, hasVideo: videos.length === 1 };
   } catch (error) {
     if (error instanceof MemoryError) throw error;

@@ -13,6 +13,11 @@ These fixtures are generated test media. They contain no user recordings, person
 - `tone-aac.m4a`, `tone.aac`: generated 2-second 440 Hz mono input at 48 kHz, native FFmpeg AAC at 96 kbit/s. M4A presents 96000 samples; ADTS remux retains 97280 samples including transport priming/padding.
 - `tone-he-aac.m4a`, `tone-he.aac`, `tone-he-aac-v2.m4a`, `tone-he-v2.aac`: the same generated tone at 48 kHz stereo, encoded with AudioToolbox `aac_at` profiles 4 / 28 at 48 / 32 kbit/s; ADTS uses `-c copy -f adts`. M4A declares 2090 ms and physically presents 100288 samples after priming; ADTS retains 102400 samples. The original 2-second tone is not their encoded duration assertion.
 - `multi-aac.m4a`: multiple AAC tracks, expected rejection. AAC construction commands and exact timing checks are documented in [the codec module](../../codecs/aac/README.md).
+- `timing.webm`: synthetic VP9 video and Opus tone; tests beginning/middle/tail excerpts, original video packet preservation, decoder preroll and sample-based audio trimming into MOV.
+- `timing-aac.mkv`: synthetic AVC video and AAC tone; tests AAC codec delay, full-history decoding and the same excerpt/clock mapping contract.
+- `audio-tail.webm`: synthetic recording whose audio continues after its final video frame; checks that source duration and derived output retain the audio tail.
+- `expansion-aac.mp4`: the same 30-second stereo silence as `expansion.webm`, with AAC packet timestamps rebased to zero (`asetpts=PTS+1024/SR/TB`, `-use_editlist 0`). Checks that a small ISO original is routed to multipart when its actual float32 soundtrack exceeds 8 MiB; a 10-second excerpt succeeds. The first fixture export retained negative AAC priming and was correctly rejected before this size check.
+- `expansion.webm`: synthetic compressed recording below the original-file size bound whose float32 PCM derivative exceeds inline 8 MiB; checks `media_inline_expansion_exceeded` and the multipart route. These fixtures establish format/runtime behavior, not real-model semantic quality.
 - `offset.mp4`: nonzero presentation origin, expected rejection.
 - `multi-audio.mp4`: multiple soundtrack tracks, expected rejection.
 - `encrypted.mp4`: synthetic encrypted media, expected rejection without a decryption key.

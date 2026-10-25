@@ -31,9 +31,9 @@ test('range-backed inspection and forced-copy preserve audio/video and a common 
   // This fixture's suffix is not required by either container inspection or this selected window.
   assert.ok(Math.max(...media.reads.map(r => r.offset + r.length)) < bytes.length);
 });
-test('oversize actual windows, unsupported containers, encrypted or multiple audio tracks reject', async () => {
+test('oversize actual windows, mislabeled containers, encrypted or multiple audio tracks reject', async () => {
   await assert.rejects(sliceVideo('video/mp4', source(fixture('blue-tone.mp4')), { startMs: 300, endMs: 700 }, 1024), /media_slice_too_large/);
-  await assert.rejects(inspectLongVideo('video/webm', source(fixture('blue.mp4'))), /media_type_unsupported/);
+  await assert.rejects(inspectLongVideo('video/webm', source(fixture('blue.mp4'))), /media_container_invalid/);
   await assert.rejects(inspectLongVideo('video/mp4', source(fixture('encrypted.mp4'))), /media_encrypted/);
   await assert.rejects(inspectLongVideo('video/mp4', source(fixture('multi-audio.mp4'))), /media_tracks_invalid/);
   await assert.rejects(inspectLongVideo('video/mp4', { size: 100, read: async () => new Uint8Array(0) }), /media_range_short/);

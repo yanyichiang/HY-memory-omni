@@ -9,7 +9,7 @@ const hints = {
   media_timeline_origin: 'Rebase presentation timestamps to zero before upload.',
   audio_codec_unsupported: 'Use a supported audio codec listed in docs/MEDIA.md; changing the extension does not convert a codec.',
   media_slice_too_large: 'Use a shorter segment duration or export a lower bitrate recording.',
-  media_inline_expansion_exceeded: 'Use /audio/upload. The decoded WAV is too large for inline ingestion; the compressed original is still supported as a segmented recording.',
+  media_inline_expansion_exceeded: 'Use /audio/upload or /video/upload for the matching recording type. Its decoded media is too large for inline ingestion; choose shorter segments.',
 };
 export async function inspectFile(path) {
   if (!path) throw new Error('Usage: hy-memory-omni inspect FILE (run npm run build first).');
@@ -28,7 +28,8 @@ export async function inspectFile(path) {
       return new Uint8Array(bytes.subarray(0, result.bytesRead));
     };
     const head = Buffer.from(await read(0, Math.min(size, 64)));
-    let mimeType = head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE' ? 'audio/wav'
+    let mimeType = head.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) ? 'matroska'
+      : head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE' ? 'audio/wav'
       : head.toString('ascii', 0, 4) === 'OggS' ? 'audio/ogg'
       : head.toString('ascii', 0, 4) === 'fLaC' ? 'audio/flac'
       : head[0] === 255 && (head[1] & 0xf6) === 0xf0 ? 'audio/aac'
@@ -39,6 +40,10 @@ export async function inspectFile(path) {
       : head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WEBP' ? 'image/webp' : undefined;
     if (!mimeType) return { supported: false, bytes: size, error: 'unrecognized_container', hint: 'See docs/MEDIA.md for supported containers and codecs. The filename extension is not used to infer support.' };
     try {
+      if (mimeType === 'matroska') {
+        const { checkMatroska } = await import('../memory/dist/video.js');
+        mimeType = await checkMatroska({ size, read });
+      }
       if (mimeType === 'video/mp4') {
         // Shared brands (including isom) do not tell whether a file contains audio or video.
         const { classifyIsoMedia } = await import('../memory/dist/video.js');
@@ -57,7 +62,7 @@ export async function inspectFile(path) {
         await inspectMedia(mimeType, await read(0, size));
       }
       let multipart = size > 8 * 1024 * 1024 || !!timeline && timeline.durationMs > (timeline.hasVideo ? 120000 : 180000);
-      if (!multipart && ['audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac'].includes(mimeType)) {
+      if (!multipart && (mimeType.startsWith('video/') || ['audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac'].includes(mimeType))) {
         // A short compressed recording can still exceed the inline native representation limit.
         const { inspectMedia } = await import('../memory/dist/media.js');
         try { await inspectMedia(mimeType, await read(0, size)); }

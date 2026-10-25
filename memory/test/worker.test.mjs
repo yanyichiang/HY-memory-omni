@@ -31,6 +31,18 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
     return Response.json({ success: true, nodes: [...body.nodes, { payload: { node_id: body.requestId, user_id: body.principal.ownerRef,
       agent_id: body.principal.scopeRef, content: body.content, layer: 'l2_fact', status: 'active', is_latest: true, custom: { meta: [{ sourceRef: body.sourceRef }] } }, embedding: [1, 0, 0], lexicalTokens:['fixture','observation'] }] });
   };
+  let activeMatroska = false, nativeQuery = false, normalizedWire;
+  const checkVideoWire = (mimeType, data, stage) => {
+    if (!activeMatroska || !mimeType.startsWith('video/')) return;
+    assert.equal(mimeType, 'video/quicktime', 'Matroska source/query must use normalized MOV on model wire');
+    const bytes = Buffer.from(data, 'base64');
+    assert.ok(bytes.length >= 16);
+    assert.equal(bytes.toString('ascii', 4, 8), 'ftyp');
+    const boxSize = bytes.readUInt32BE(0);
+    assert.ok(boxSize >= 16 && boxSize <= bytes.length);
+    assert.equal(bytes.toString('ascii', 8, 12), 'qt  ', 'native payload must actually be QuickTime, not renamed Matroska');
+    normalizedWire[stage]++;
+  };
   const outbound = async request => {
     const url = new URL(request.url);
     if (url.pathname.endsWith('/chat/completions')) {
@@ -54,6 +66,7 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
     if (url.pathname.endsWith(':embedContent')) {
       const body = await request.json();
       for (const part of body.content.parts) {
+        if (part.inline_data) checkVideoWire(part.inline_data.mime_type, part.inline_data.data, nativeQuery ? 'queryEmbedding' : 'sourceEmbedding');
         if (part.inline_data?.mime_type.startsWith('audio/')) {
           assert.ok(['audio/wav', 'audio/mpeg'].includes(part.inline_data.mime_type),
             'source and query embeddings must receive a supported native representation');
@@ -79,6 +92,7 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
         return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(answer) }] } }] });
       }
       const native = body.contents[0].parts[0].inlineData;
+      checkVideoWire(native.mimeType, native.data, schema ? 'grounding' : 'perception');
       assert.ok(native.data.length > 100);
       const audioOnly = native.mimeType.startsWith('audio/');
       return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: body.generationConfig.responseSchema
@@ -167,7 +181,10 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
     assert.deepEqual((await api('/search', { query: 'badge', sessionRef: 'session-d' })).items, []);
     for (const [file, mimeType] of [['blue-tone.mp4', 'video/mp4'], ['tone.wav', 'audio/wav'],
       ['synthetic-extended-48123.opus', 'audio/ogg'], ['synthetic-extended-48123.flac', 'audio/flac'],
-      ['tone-aac.m4a', 'audio/mp4'], ['tone.aac', 'audio/aac']]) {
+      ['tone-aac.m4a', 'audio/mp4'], ['tone.aac', 'audio/aac'],
+      ['timing.webm', 'video/webm'], ['timing-aac.mkv', 'video/x-matroska']]) {
+      activeMatroska = ['video/webm', 'video/x-matroska'].includes(mimeType);
+      normalizedWire = { sourceEmbedding: 0, queryEmbedding: 0, perception: 0, grounding: 0 };
       const original = (await readFile(new URL(`fixtures/${file}`, import.meta.url))).toString('base64');
       const temporal = await api('/ingest', { operationId: file, sessionRef: 'session-av', messageRef: file, mimeType, dataBase64: original });
       await mf.dispose(); mf = create();
@@ -181,20 +198,23 @@ test('real Worker entrypoint + SQLite DO + R2 preserve source through restart, c
       const range = { startMs: grounding.startMs, endMs: grounding.endMs };
       const read = await api('/read', { ref: temporal.ref, range });
       assert.deepEqual(read.selection, range); assert.equal(read.originalIsFullFile, true);
-      assert.equal(read.dataBase64, original); assert.ok(read.timeline.durationMs >= 1000);
+      assert.equal(read.dataBase64, original); assert.equal(read.mimeType, mimeType); assert.ok(read.timeline.durationMs >= 1000);
       let current = temporal.ref;
-      if (['audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac'].includes(mimeType)) {
+      if (activeMatroska || ['audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac'].includes(mimeType)) {
+        nativeQuery = true;
         const native = await api('/search', { media: { mimeType, dataBase64: original }, sessionRef: 'native-format-query' });
+        nativeQuery = false;
         assert.ok(native.items.some(item => item.refs.some(ref => ref.sourceId === temporal.ref.sourceId)),
-          'native compressed audio can query the original source');
-        const rebuilt = await api('/reinspect', { ref: temporal.ref, operationId: `reinspect-${file}`, question: 'Describe the audible tone.' });
+          'native encoded audio/video can query the original source');
+        const rebuilt = await api('/reinspect', { ref: temporal.ref, operationId: `reinspect-${file}`, question: 'Describe the recording.' });
         current = rebuilt.ref;
         assert.equal(current.revision, temporal.ref.revision + 1);
         assert.equal((await api('/validate', { refs: [temporal.ref] })).valid, false);
         const originalRead = await api('/read', { ref: current });
         assert.equal(originalRead.mimeType, mimeType);
-        assert.equal(originalRead.dataBase64, original, 'reinspection retains compressed original bytes');
+        assert.equal(originalRead.dataBase64, original, 'reinspection retains encoded original bytes');
       }
+      if (activeMatroska) for (const [stage, count] of Object.entries(normalizedWire)) assert.ok(count > 0, `normalized MOV must reach ${stage}`);
       await api('/delete', { operationId: `delete-${file}`, ref: current });
       assert.equal((await api('/validate', { refs: [current] })).valid, false);
       assert.equal((await api('/validate', { refs: [temporal.ref] })).valid, false);

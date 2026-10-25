@@ -5,12 +5,15 @@ import { readConfig } from '../scripts/config.mjs';
 import { createRuntime } from '../scripts/runtime.mjs';
 
 const profile = process.env.HY_LIVE_PROFILE || 'all';
-if (!['knowledge', 'media', 'formats', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats or all.');
+if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats, containers, container-search or all.');
 if (!process.env.HY_LIVE_OUTPUT) throw Error('Set HY_LIVE_OUTPUT to a new private results directory. This command calls your configured live models.');
 const out = resolve(process.env.HY_LIVE_OUTPUT);
+const reuseFrom = process.env.HY_LIVE_REUSE_FROM;
+if (reuseFrom && profile !== 'container-search') throw Error('Reuse is limited to the query-only container-search continuation.');
 await mkdir(out, { mode: 0o700 }); // Never overwrite a first run or reuse its memory.
 const config = await readConfig();
 const report = { profile, startedAt: new Date().toISOString(), revision: process.env.HY_ACCEPTANCE_REVISION || 'working-tree',
+  ...(reuseFrom ? { reuseFrom: resolve(reuseFrom), scope: 'Query-only continuation; no ingestion/reasoning replay.' } : {}),
   models: Object.fromEntries(Object.entries(config).filter(([k]) => k.endsWith('_MODEL'))),
   semanticReview: { status: 'required', note: 'Inspect first responses against fixture ground truth, including conclusion meaning, native evidence, explicit authority and revision targets. A matching word is not semantic proof.' },
   checks: [], failures: [], calls: 0, finished: false };
@@ -45,7 +48,7 @@ const transport = async request => {
   return response;
 };
 let runtime;
-const start = () => createRuntime({ config, persistence: join(out, 'storage'), port: 0, outboundService: transport });
+const start = () => createRuntime({ config, persistence: join(reuseFrom ? resolve(reuseFrom) : out, 'storage'), port: 0, outboundService: transport });
 async function api(path, body = {}) {
   const response = await runtime.dispatchFetch(`https://acceptance.test${path}`, { method: 'POST', headers: {
     Authorization: `Bearer ${config.HY_API_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -191,6 +194,52 @@ async function formatCases() {
   check('format revocation invalidates current reference', !(await api('/validate', { refs: [revised.ref] })).valid);
   await save();
 }
+async function containerQuery() {
+  const query = await readFile(new URL('./live-fixtures/proposal.webm', import.meta.url));
+  const native = await api('/search', { media: { mimeType: 'video/webm', dataBase64: query.toString('base64') }, sessionRef: 'native-webm' });
+  check('native WebM query grounds MKV audio evidence', native.items.some(v => v.groundings?.some(g => g.modalities.includes('audio'))) && native.videos?.some(v => v.ref.sourceId === source('container') && v.clips.length));
+  const clips = native.videos?.find(v => v.ref.sourceId === source('container'))?.clips ?? [];
+  check('native WebM query excludes different meeting events', clips.length > 0 && clips.every(c => c.startMs < 7043 && c.endMs <= 7043), clips);
+}
+async function containerSearchCases() {
+  if (reuseFrom) {
+    const status = await api('/video/status', { operationId: 'multipart-video' });
+    if (status.state !== 'complete' || !status.ref) throw Error('The reused recording must already be complete; no retry or recovery is performed.');
+    refs.container = status.ref;
+  } else {
+    const original = await readFile(new URL('./live-fixtures/meeting.mkv', import.meta.url));
+    refs.container = await recording('video', 'video/x-matroska', original, 15);
+  }
+  await containerQuery();
+  await save();
+}
+async function containerCases() {
+  // Existing scripted meeting: copied video and continuously encoded soundtrack
+  // in MKV. The WebM query has a plain blue
+  // image and the first spoken proposal, so grounding must use the soundtrack.
+  const original = await readFile(new URL('./live-fixtures/meeting.mkv', import.meta.url));
+  refs.container = await recording('video', 'video/x-matroska', original, 15);
+  const range = await api('/read', { ref: refs.container, range: { startMs: 0, endMs: 1000 } });
+  check('MKV range returns linked native MOV', range.mimeType === 'video/quicktime' && range.ref.sourceId === source('container') && range.originalIsFullFile === false && range.dataBase64.length > 0);
+  await api('/video/reason', { ref: refs.container, operationId: 'reason-mkv', query: 'What day is meeting M42 scheduled for after the final explicit revision?' });
+  const result = await waitJob('video', 'reason-mkv');
+  check('MKV cross-clip final revision is Sunday', /Sunday|周日|星期日|星期天|周天/i.test(result.reasoning?.conclusion?.text || ''), result.reasoning?.conclusion);
+  check('MKV conclusion cites complete native evidence', result.reasoning?.conclusion?.status === 'provisional' && !result.reasoning.incomplete && !result.reasoning.requireMore && !result.reasoning.coverageIncomplete && result.reasoning.conclusion.support.length > 0 && result.reasoning.conclusion.opposition.length === 0);
+  const grouped = await api('/search', { query: 'M42 meeting schedule decision', sessionRef: 'grouped-mkv' });
+  check('MKV clips grouped under original', grouped.videos?.some(v => v.ref.sourceId === source('container') && v.clips?.length));
+  await containerQuery();
+  const old = refs.container;
+  await api('/reinspect', { ref: old, operationId: 'reinspect-mkv', question: 'Recheck the spoken meeting schedule and any explicit corrections.' });
+  refs.container = (await waitJob('video', 'reinspect-mkv')).ref;
+  check('MKV rebuild advances source and invalidates old reference', refs.container.sourceId === old.sourceId && refs.container.revision === old.revision + 1 && !(await api('/validate', { refs: [old] })).valid);
+  await runtime.dispose(); runtime = await start();
+  check('MKV rebuilt source survives restart', (await api('/validate', { refs: [refs.container] })).valid);
+  await api('/revoke', { ref: refs.container, operationId: 'revoke-mkv' });
+  check('MKV revocation invalidates rebuilt reference', !(await api('/validate', { refs: [refs.container] })).valid);
+  const after = await api('/search', { query: 'M42 meeting schedule decision', sessionRef: 'revoked-mkv' });
+  check('revoked MKV absent from grouped search', !after.videos?.some(v => v.ref.sourceId === source('container')));
+  await save();
+}
 try {
   runtime = await start();
   check('unauthenticated API rejected', (await runtime.dispatchFetch('https://acceptance.test/revision', { method: 'POST', headers: { 'Content-Type':'application/json' }, body:'{}' })).status === 401);
@@ -198,6 +247,8 @@ try {
   if (profile === 'all' || profile === 'knowledge') await knowledgeCases();
   if (profile === 'all' || profile === 'media') await mediaCases();
   if (profile === 'formats') await formatCases();
+  if (profile === 'containers') await containerCases();
+  if (profile === 'container-search') await containerSearchCases();
   report.finished = true;
 } catch (error) {
   report.failures.push(error.message); report.error = error.message;

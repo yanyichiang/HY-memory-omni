@@ -3,6 +3,7 @@
   "name": "hy-memory-omni-store",
   "main": "src/worker.ts",
   "build": { "command": "node scripts/prepare-codecs.mjs" },
+  "alias": { "mediabunny": "./.generated/mediabunny/src/index.ts" },
   "find_additional_modules": true,
   "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }],
   "compatibility_date": "2026-10-19",
