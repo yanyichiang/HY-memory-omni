@@ -343,6 +343,7 @@ async function officeRenderingCases(){
     const found=await api('/search',{query:c.query,sessionRef:'office-layout-query',limit:20});
     const evidence=found.items.flatMap(i=>i.documentEvidence??[]);
     check(c.name,evidence.some(e=>e.original.sourceId===documents[c.document].ref.sourceId&&e.basis==='rendered-document-page'&&e.locator.page===c.page),evidence.map(e=>({original:e.original,locator:e.locator,basis:e.basis,text:e.text})));
+    check(`${c.name} excludes native or other-page evidence`,evidence.every(e=>e.original.sourceId===documents[c.document].ref.sourceId&&e.basis==='rendered-document-page'&&e.locator.page===c.page),evidence.map(e=>({original:e.original,locator:e.locator,basis:e.basis,text:e.text})));
   }
   const absent=await api('/search',{query:'Find a rendered spreadsheet page visibly displaying the exact text HIDDEN ROW or HIDDEN COLUMN. Text retained only in hidden native cells does not qualify.',sessionRef:'office-layout-negative',limit:20});
   check('hidden cells do not become visible page evidence',!absent.items.some(i=>i.documentEvidence?.some(e=>e.original.sourceId===documents[1].ref.sourceId)),absent.items.flatMap(i=>i.documentEvidence??[]));

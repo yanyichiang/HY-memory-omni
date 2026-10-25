@@ -173,3 +173,6 @@ Use the same upload/part/complete-upload/status/events/step/reason/recover/abort
 `/read` accepts the root ref plus a range and returns native WAV with sample-derived coordinates. `/correct` and `/reinspect` rebuild the entire source and invalidate its older version. Search groups matching clips under `audios`, independently of `videos`. `/audio/reason` takes `{ ref, query, operationId }`; poll `/audio/status` and read its evidence-backed conclusion. Grouping alone does not establish that conclusion.
 
 Known Word dimensional properties include optional `measurements` annotations computed by the host (twips or half-points to points/inches). Raw attributes remain present. Preferred table/cell widths and initial grid widths are identified as such, without resolving effective layout. Reinspect older sources to regenerate these annotations; grounding does not invent conversions for fields without them.
+
+
+For a query requiring a rendered Word/Excel page or placement on the same rendered page, native paragraphs/cell ranges alone are insufficient evidence. They remain searchable for their preserved text, values and explicit properties. Rendered-page evidence must inspect the attached derived PDF; matching text in a native range or likely print settings does not establish that page relationship.
