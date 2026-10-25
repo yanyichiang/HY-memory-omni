@@ -1,0 +1,73 @@
+Original source comments, retained verbatim below. Full license: Apache-2.0.txt
+
+Source: node_modules/pdf-lib/src/core/streams/Ascii85Stream.ts
+/*
+ * Copyright 2012 Mozilla Foundation
+ *
+ * The Ascii85Stream class contained in this file is a TypeScript port of the
+ * JavaScript Ascii85Stream class in Mozilla's pdf.js project, made available
+ * under the Apache 2.0 open source license.
+ */
+
+Source: node_modules/pdf-lib/src/core/streams/AsciiHexStream.ts
+/*
+ * Copyright 2012 Mozilla Foundation
+ *
+ * The AsciiHexStream class contained in this file is a TypeScript port of the
+ * JavaScript AsciiHexStream class in Mozilla's pdf.js project, made available
+ * under the Apache 2.0 open source license.
+ */
+
+Source: node_modules/pdf-lib/src/core/streams/DecodeStream.ts
+/*
+ * Copyright 2012 Mozilla Foundation
+ *
+ * The DecodeStream class contained in this file is a TypeScript port of the
+ * JavaScript DecodeStream class in Mozilla's pdf.js project, made available
+ * under the Apache 2.0 open source license.
+ */
+
+Source: node_modules/pdf-lib/src/core/streams/FlateStream.ts
+/*
+ * Copyright 1996-2003 Glyph & Cog, LLC
+ *
+ * The flate stream implementation contained in this file is a JavaScript port
+ * of XPDF's implementation, made available under the Apache 2.0 open source
+ * license.
+ */
+
+Source: node_modules/pdf-lib/src/core/streams/FlateStream.ts
+/*
+ * Copyright 2012 Mozilla Foundation
+ *
+ * The FlateStream class contained in this file is a TypeScript port of the
+ * JavaScript FlateStream class in Mozilla's pdf.js project, made available
+ * under the Apache 2.0 open source license.
+ */
+
+Source: node_modules/pdf-lib/src/core/streams/LZWStream.ts
+/*
+ * Copyright 2012 Mozilla Foundation
+ *
+ * The LZWStream class contained in this file is a TypeScript port of the
+ * JavaScript LZWStream class in Mozilla's pdf.js project, made available
+ * under the Apache 2.0 open source license.
+ */
+
+Source: node_modules/pdf-lib/src/core/streams/RunLengthStream.ts
+/*
+ * Copyright 2012 Mozilla Foundation
+ *
+ * The RunLengthStream class contained in this file is a TypeScript port of the
+ * JavaScript RunLengthStream class in Mozilla's pdf.js project, made available
+ * under the Apache 2.0 open source license.
+ */
+
+Source: node_modules/pdf-lib/src/core/streams/Stream.ts
+/*
+ * Copyright 2012 Mozilla Foundation
+ *
+ * The Stream class contained in this file is a TypeScript port of the
+ * JavaScript Stream class in Mozilla's pdf.js project, made available
+ * under the Apache 2.0 open source license.
+ */

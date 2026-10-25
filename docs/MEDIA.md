@@ -4,6 +4,7 @@ Run `npm run build`, then `npm run inspect -- /path/to/recording`. This local co
 
 | Input | Accepted | Prepare unsupported exports |
 | --- | --- | --- |
+| Documents | PDF, DOCX, XLSX and PPTX; at most 8 MiB original per admission and 128 native units | Whole-source queued job; native pages/structure and embedded assets, not an Office print renderer; see below |
 | Images | PNG, JPEG, WebP; bounded HEIC/HEIF/AVIF and GIF, up to 8 MiB original bytes | See image representation limits below |
 | Audio | PCM WAV (u8/s16/s24/s32/f32, little-endian RIFF), MP3; M4A/ADTS AAC-LC, HE-AAC, HE-AACv2; Ogg Opus; native FLAC | See the codec limits below; RF64, compressed WAV and other Ogg codecs are not accepted |
 | Video | MP4/QuickTime with AVC, HEVC, AV1 or VP9 and optional AAC/MP3 soundtrack; restricted WebM/Matroska with the same video codecs and optional Opus/AAC/MP3 | Select one video track and at most one soundtrack; export timestamps starting at zero |
@@ -84,3 +85,28 @@ The service accepts a single HEIF still item or a single visual sequence. Multi-
 GIF canvases are bounded to 1,048,576 pixels, side 4096, 128 frames and 32 MiB cumulative decoded work. The animation encoder accepts a coded canvas of at most 1,048,576 pixels, side 2048, at most 128 frames, 120 seconds and 8 MiB output. It uses white matte, YUV420 and edge padding; these are disclosed derivatives. Unknown GIF applications, plain-text blocks and user-interaction waits are rejected. Long animation uploads are not routed through `/video/upload`; export an explicitly timed video for that interface.
 
 Raw source coordinates are authoritative. A sampled/converted representation can omit fine detail; query cues from animations are observed separately before source grounding, with the same disclosed lossiness as audio/video cues. Source correction, reinspection and revocation retain the existing whole-source version rules.
+
+## PDF and Office documents
+
+Documents preserve the uploaded binary independently from derived evidence units. PDF pages retain native page visuals and zero-based page index, size and rotation; there is no mandatory text-only extraction or local rasterization. DOCX uses section/block, ordered paragraphs, table row-column/span and drawing anchors. XLSX uses sheet/name/range, merges, dimensions/styles, formulas and cached values separately, plus workbook `date1904` (1900 versus 1904 date system) without silently converting serial values into dates. PPTX uses intrinsic slides, shape/group z-order and local geometry. DOCX/XLSX locations do not imply physical print pages.
+
+Embedded images retain their relationship and anchor and accompany the unit's bounded structural context. PNG/JPEG/WebP bytes pass through to the native provider; HEIC/AVIF/GIF use the bounded local decoder. Admission is not proof that the provider can decode every embedded asset. Cropped assets retain the crop/viewport metadata, but are supplied as the **full embedded asset** with a full-asset indication and `image-crop-not-rendered` coverage; the crop is not rasterized. A model must not treat a detail outside the viewport as proved visible in the document. Group transforms, themes, master/layout inheritance, font layout, charts and other unsupported objects are not silently rendered. Explicit per-unit and document coverage records what was not parsed or rendered. The current path is not a Word/Excel print renderer or complete Office conformance implementation.
+
+| Budget | Current bound |
+| --- | --- |
+| One original admission | 8 MiB original bytes; at most 128 native units plus one optional Owner correction annotation |
+| ZIP package | At most 512 parts, 8 MiB per expanded part, 24 MiB aggregate expansion |
+| XML | At most 1 MiB per part, depth 64 and 65,536 nodes |
+| PDF decode | At most 8 MiB per decoded stream; 24 MiB cumulative decode buffer allocations |
+| PDF output | At most 8 MiB per single-page output and 16 MiB aggregate output |
+| Unit context | At most 64 KiB structural context and 64 KiB image-anchor metadata; XLSX dense regions split further or reject |
+| Prepared representation | At most 8 MiB per serialized unit, 24 MiB aggregate; at most six embedded images per unit |
+| Native document query | At most 2 MiB original; PDF at most six pages; Office representation at most six native media parts and 64 KiB structural text |
+
+These are admission/execution bounds, **not a cap on the total stored corpus**. Oversized or invalid inputs fail explicitly. The PDF build uses the pinned bounded pdf-lib adaptation; the unpatched parser is rejected. Cumulative allocation budget is not a claim about measured isolate peak memory. XML namespace identity uses URI rather than conventional prefix names. Invalid XML, DTD/entity declarations, unsafe paths and missing relationships fail; external relationship targets are recorded but never fetched. Old binary DOC/XLS/PPT, encrypted documents and macro execution are not supported.
+
+`/ingest` queues document formation; `/document/status`, `/document/step`, `/document/recover` and `/document/units` govern progress, explicit recovery and navigation. Only completion of every unit publishes the root. Root reads retain the original; child reads return derived JSON with native page/image evidence and original locator. Whole-source correction/reinspection invalidates old root/children; delete/revoke operates on the root. Search groups the root and native units, but grouping does not imply cross-page reasoning and there is no such document endpoint. Knowledge cross-source relations retain their existing evidence and revision semantics. See [API details](API.md#pdf-and-office-document-jobs).
+
+Document embedding requests request rejection of overlong inputs with `autoTruncate: false`. Live native PDF/image requests were accepted with this setting; overlong rejection has not been live-tested. Format/parser acceptance, synthetic lifecycle checks and real-model semantic acceptance are separate evidence layers; see the [acceptance record](ACCEPTANCE.md).
+
+Owner document corrections are separate, root-scoped annotation units. Native units are re-observed under observation authority; a local correction is not copied onto every page. The Owner annotation preserves its stated location qualifiers and can be relevant correction context, never native page proof. Deterministically empty paragraphs/pages/shapes/worksheets retain readable locators but create no model calls, vectors or claims; nonempty invalid/unreadable content continues to fail explicitly.

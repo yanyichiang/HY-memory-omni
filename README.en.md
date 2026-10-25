@@ -4,7 +4,7 @@
 
 **Memory across modalities. Evidence you can trace.**
 
-Standalone memory for AI agents · Text / Images / Audio / Video
+Standalone memory for AI agents · Text / Images / Audio / Video / PDF and Office Documents
 
 <p>
   <a href="package.json"><img src="https://img.shields.io/badge/version-0.1.0-6366f1?style=flat-square" alt="Version 0.1.0"></a>
@@ -23,11 +23,11 @@ Standalone memory for AI agents · Text / Images / Audio / Video
 
 ---
 
-**HY-memory-omni** builds on [Tencent Hy-Memory](https://github.com/Tencent-Hunyuan/Hy-Memory), bringing text, images, audio, and video into a shared workflow for source management, evidence linking, conflict assessment, and revision governance. Developed and maintained by **YY**, it is an independent derivative project.
+**HY-memory-omni** builds on [Tencent Hy-Memory](https://github.com/Tencent-Hunyuan/Hy-Memory), bringing text, images, audio, video, and PDF / Office documents into a shared workflow for source management, evidence linking, conflict assessment, and revision governance. Developed and maintained by **YY**, it is an independent derivative project.
 
 Original media and structured propositions coexist: retrieve memories, inspect their original evidence, or use the originals to extract, verify, and revise information again. Agents connect over HTTP, without a dependency on any particular agent framework.
 
-> **Current version: 0.1.0.** Installation, startup, and lifecycle acceptance for all four modalities have been completed for the standalone source tree and npm source package. The project currently provides a source repository and an npm source package; no npm registry package or hosted service has been published. See [Verification and Status](#verification-and-status) for the evidence scope.
+> **Current version: 0.1.0.** Installation, startup, and lifecycle acceptance for all four modalities have been completed for the standalone source tree and npm source package. Validation for the new document path is recorded separately. The project currently provides a source repository and an npm source package; no npm registry package or hosted service has been published. See [Verification and Status](#verification-and-status) for the evidence scope.
 
 ## Features
 
@@ -37,6 +37,7 @@ Original media and structured propositions coexist: retrieve memories, inspect t
 | 🖼️ **Image memory** | PNG/JPEG/WebP plus bounded HEIC/AVIF/GIF; preserve originals and animation timing, and verify retrieval against media evidence |
 | 🎧 **Audio memory** | Preserve original audio and time positions; retrieve speech and non-speech evidence |
 | 🎬 **Video memory** | Process visuals and audio together and return time ranges traceable to the original video |
+| 📄 **Document memory** | Preserve PDF pages, native Office paragraphs/tables/cells/slides and image anchors; form whole sources asynchronously and retain unparsed/unrendered coverage |
 | 🔎 **Cross-modal retrieval** | Query with text or native media and connect evidence across modalities |
 | 🧩 **Knowledge governance** | Link propositions across sources, identify conflicts, apply revisions when justified, and recompute eligibility after source revocation |
 | 📦 **Standalone operation** | Start the authenticated gateway, memory service, and Python engine with one `npm start` |
@@ -238,7 +239,7 @@ Four-modality lifecycle acceptance runs real workerd, Hy Writer / Reader, SQLite
 
 ### Live-provider acceptance
 
-`npm run test:live` uses the configured real models, production Python entrypoint, authenticated gateway and independent temporary storage. Set `HY_LIVE_OUTPUT` to a new private directory. `HY_LIVE_PROFILE=knowledge` or `media` selects the governance or audiovisual cases; the default is `all`. First API/model responses and usage are retained without automatic retry or failure overwrites. After machine checks, review answer meaning, native evidence and revision targets against the fixed script; the report explicitly records that semantic review is still required. The command invokes your models; never commit its output or credentials.
+`npm run test:live` uses the configured real models, production Python entrypoint, authenticated gateway and independent temporary storage. Set `HY_LIVE_OUTPUT` to a new private directory. `HY_LIVE_PROFILE=knowledge`, `media` or `documents` selects the governance or audiovisual cases; the default is `all`. First API/model responses and usage are retained without automatic retry or failure overwrites. After machine checks, review answer meaning, native evidence and revision targets against the fixed script; the report explicitly records that semantic review is still required. The command invokes your models; never commit its output or credentials.
 
 Cases cover cross-source conflict, explicit revision, withdrawal recomputation, original-image reinspection, native-media recall, recording segmentation/grouping and cross-clip conclusions. See the [acceptance record](docs/ACCEPTANCE.md) for executed results; these synthetic regression cases are not a general accuracy benchmark.
 
@@ -261,18 +262,20 @@ npm pack
 
 ## Current Scope
 
-- “omni” covers the implemented **text, image, audio, and video** modalities. Supported media formats and codecs depend on the API.
+- “omni” covers the implemented **text, image, audio, video, and PDF / Office documents** modalities. Supported media formats and codecs depend on the API.
 - There is no application-level fixed **2,000-memory total limit**. Request pagination, media size, context windows, and underlying platform capacity retain their respective constraints.
 - Retrieval returns a bounded candidate set. No hit does not prove that relevant evidence is absent; grouping segments by video also does not mean cross-segment reasoning has reached a conclusion.
 - Cross-clip reasoning event timestamps are model estimates and may be inaccurate even when the conclusion is correct. New events identify this basis and the supplied media window; inspect native evidence through the archived `clipRef`.
 - The current editing unit is a **whole-source rebuild**. Individual fact editing is not yet available.
 - Audio supports PCM WAV, MP3, M4A / ADTS AAC-LC, HE-AAC and HE-AACv2, Ogg Opus, and native FLAC. AAC / Opus accept mono or stereo; FLAC preserves up to eight channels. Originals are retained; the new compressed formats use float32 WAV derivatives for understanding, media queries and embedding. Small derivatives must fit 8 MiB, and long-audio excerpts 4 MiB; use multipart ingestion when the inline bound is exceeded. See [compatibility](docs/MEDIA.md) for timing and rejection rules. Live calls passed M4A ingestion, Opus/AAC queries and the rebuild/revocation lifecycle; one FLAC query false negative remains in the [acceptance record](docs/ACCEPTANCE.md).
 - Video also supports a restricted WebM / MKV subset: AVC, HEVC, VP9 or AV1 video, with at most one Opus, AAC or MP3 soundtrack. The original container is retained. Existing WASM decoders turn Opus / AAC into sample-trimmed float32 PCM, muxed with the original video packets into MOV for understanding, native queries and embedding; MP3 packets remain compressed. Existing inline, segmented-job and whole-source rebuild / revocation paths apply. PCM expansion can push a small original beyond the 8 MiB derivative bound; use `/video/upload`, and reduce `seconds` for oversized fixed clips. Each clip currently scans from the source beginning; AAC is fully decoded while only the window is retained. Format acceptance does not establish completed real semantic acceptance; see [compatibility](docs/MEDIA.md).
+- PDF / DOCX / XLSX / PPTX preserve the original and asynchronously form native evidence units: PDF page visuals, PPTX slide shapes, DOCX paragraphs/tables/drawing anchors, and XLSX sheet ranges, formulas versus cached values, date system and image anchors. Structure and embedded images coexist. Cropped assets retain full-asset and unrendered-viewport indications; this is not a print renderer or complete Office conformance implementation. The root publishes only after all units finish, and whole-source rebuild/revocation applies to every child. Grouping is not cross-page reasoning; no document cross-page reasoning endpoint is provided. The 8 MiB / 128-native-unit limit (plus one optional Owner annotation) applies to each admission, not total corpus storage; query, PDF decode and ZIP expansion have [separate budgets](docs/MEDIA.md#pdf-and-office-documents). See the [acceptance record](docs/ACCEPTANCE.md) for real-model status.
+- A local document correction adds an Owner annotation scoped to the current root while native units are observed again; it does not copy the correction into every page fact. Deterministically empty units retain readable locations without model calls or claims.
 - Ordinary media ingestion accepts original files up to 8 MiB; audio lasts at most 180 seconds and short video at most 120 seconds. Media queries accept original files up to 2 MiB. Long videos use the job API; long audio uses its own multipart task API with fixed/dynamic segmentation, grouping and explicit cross-clip reasoning. Run `npm run inspect -- FILE` to check an export first; see [compatibility](docs/MEDIA.md) and [API documentation](docs/API.md) for formats and errors.
 
 ## Documentation and Contributions
 
-- [API reference and examples](docs/API.md): Request formats, native media queries, revision governance, and video tasks.
+- [API reference and examples](docs/API.md): Request formats, native media queries, revision governance, and video / document tasks.
 - [Standalone installation acceptance record](docs/ACCEPTANCE.md): Verified behavior, failures and fixes, and verification boundaries.
 - [Project working agreements](AGENTS.md): Component responsibilities, source governance, privacy, and release boundaries.
 - [Third-party license notices](THIRD_PARTY_NOTICES.md): Dependency attribution, licenses, and distribution requirements.

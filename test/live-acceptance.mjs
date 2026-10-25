@@ -5,7 +5,7 @@ import { readConfig } from '../scripts/config.mjs';
 import { createRuntime } from '../scripts/runtime.mjs';
 
 const profile = process.env.HY_LIVE_PROFILE || 'all';
-if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'images', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats, containers, container-search, images or all.');
+if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'images', 'documents', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats, containers, container-search, images, documents or all.');
 if (!process.env.HY_LIVE_OUTPUT) throw Error('Set HY_LIVE_OUTPUT to a new private results directory. This command calls your configured live models.');
 const out = resolve(process.env.HY_LIVE_OUTPUT);
 const reuseFrom = process.env.HY_LIVE_REUSE_FROM;
@@ -265,6 +265,41 @@ async function imageFormatCases() {
   check('GIF source revoked', !(await api('/validate',{refs:[refs['animated-notices']]})).valid);
   await save();
 }
+async function documentCases(){
+  const {liveDocumentFixtures}=await import('./live-document-fixtures.mjs');
+  const {fixtures,query}=await liveDocumentFixtures();
+  const documents=[];
+  for(const [index,fixture] of fixtures.entries()){
+    await writeFile(join(out,fixture.name),fixture.bytes,{mode:0o600});
+    const operationId=`document-${index}`;
+    const created=await api('/ingest',{operationId,messageRef:fixture.name,sessionRef:'native-documents',mimeType:fixture.mimeType,dataBase64:Buffer.from(fixture.bytes).toString('base64')});
+    const done=await waitJob('document',operationId),units=await api('/document/units',{ref:done.ref});
+    const original=await api('/read',{ref:done.ref});
+    check(`${fixture.name} original and units retained`,done.ref.sourceId===created.ref.sourceId&&units.units.length===fixture.units&&Buffer.from(original.dataBase64,'base64').equals(Buffer.from(fixture.bytes)));
+    for(const unit of units.units){const read=await api('/read',{ref:unit.ref});check(`${fixture.name} unit ${unit.index} linked native evidence`,read.documentUnit?.original.sourceId===done.ref.sourceId&&read.documentUnit.locator.kind===unit.locator.kind&&read.provenance.roots.length===1&&read.provenance.roots[0]===done.ref.sourceId);}
+    documents.push({fixture,ref:done.ref,units:units.units});
+  }
+  // Same retained slide original, interpreted again under the production reinspection path.
+  const slide=documents[3],old=slide.ref;
+  await api('/reinspect',{ref:old,operationId:'document-reinspect-slide',question:'Recheck the meeting identifier, scheduled date and room from the embedded original notice. Do not infer a decision from the unrelated heading.'});
+  slide.ref=(await waitJob('document','document-reinspect-slide')).ref;
+  const renewed=await api('/document/units',{ref:slide.ref});
+  check('document rebuild invalidates original root and every old unit',(await api('/validate',{refs:[old,...slide.units.map(u=>u.ref)]})).invalid.length===slide.units.length+1&&slide.ref.revision===old.revision+1);
+  slide.units=renewed.units;
+  check('document rebuild reuses native original',Buffer.from((await api('/read',{ref:slide.ref})).dataBase64,'base64').equals(Buffer.from(slide.fixture.bytes)));
+  await runtime.dispose();runtime=await start();
+  const found=await api('/search',{sessionRef:'pdf-query',limit:20,query:'Find document units containing the same PROJECT REVIEW MEETING notice shown in the query PDF. Match the meeting ID, scheduled date/time and room; the surrounding page label is not part of the requested notice. Do not match a different meeting, a budget table or an unrelated proposal.',media:{mimeType:query.mimeType,dataBase64:Buffer.from(query.bytes).toString('base64')}});
+  const expected=[documents[0].ref.sourceId,documents[1].ref.sourceId,documents[3].ref.sourceId];
+  const evidence=found.items.flatMap(i=>i.documentEvidence??[]);
+  check('text-scoped native PDF query grounds M-18 across three document formats',expected.every(id=>evidence.some(e=>e.original.sourceId===id))&&found.documents.length===3,evidence.map(e=>({original:e.original,locator:e.locator,text:e.text})));
+  check('text-scoped native PDF query excludes M-17 and unrelated cells',evidence.length===3&&evidence.every(e=>expected.includes(e.original.sourceId))&&evidence.filter(e=>e.original.sourceId===documents[0].ref.sourceId).every(e=>e.locator.pageIndex===0)&&evidence.filter(e=>e.original.sourceId===documents[1].ref.sourceId).every(e=>e.locator.blockIndex===0));
+  // Revoking every root needs no further generative call to check eligibility.
+  for(const [index,doc] of documents.entries())await api('/revoke',{ref:doc.ref,operationId:`document-revoke-${index}`});
+  const after=await knowledge();
+  check('revoked document roots remove all unit knowledge',after.claims.length===0&&after.relations.every(r=>!r.active));
+  check('revoked roots and units are invalid',!(await api('/validate',{refs:documents.flatMap(d=>[d.ref,...d.units.map(u=>u.ref)])})).valid);
+  await save();
+}
 try {
   runtime = await start();
   check('unauthenticated API rejected', (await runtime.dispatchFetch('https://acceptance.test/revision', { method: 'POST', headers: { 'Content-Type':'application/json' }, body:'{}' })).status === 401);
@@ -275,6 +310,7 @@ try {
   if (profile === 'containers') await containerCases();
   if (profile === 'container-search') await containerSearchCases();
   if (profile === 'images') await imageFormatCases();
+  if (profile === 'documents') await documentCases();
   report.finished = true;
 } catch (error) {
   report.failures.push(error.message); report.error = error.message;

@@ -52,16 +52,23 @@
     "memory/test/fixtures/tone.wav",
     "memory/test/fixtures/synthetic-meeting-m42.mp4",
     "npm-shrinkwrap.json",
-    "test/live-image-grounding.mjs"
+    "test/live-image-grounding.mjs",
+    "memory/documents/",
+    "test/live-document-fixtures.mjs",
+    "memory/test/document-fixtures.mjs",
+    "test/live-document-grounding.mjs"
   ],
   "dependencies": {
     "@wasm-audio-decoders/flac": "0.2.11",
     "esbuild": "0.28.1",
     "fast-png": "8.0.0",
+    "fast-xml-parser": "5.11.2",
+    "fflate": "0.8.3",
     "mediabunny": "1.62.1",
     "miniflare": "5.20261012.0-beta",
     "mpg123-decoder": "1.0.3",
     "opus-decoder": "0.7.12",
+    "pdf-lib": "1.17.1",
     "wrangler": "4.151.0"
   },
   "devDependencies": {

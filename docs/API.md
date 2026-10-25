@@ -41,7 +41,50 @@ const found = await memory('/search', {
 });
 ```
 
-Search returns independently grounded `items` plus grouped `videos` and `audios` when applicable. A group's clips retain their own timestamps and refs. Grouping does not itself produce a cross-clip conclusion. Check retrieval coverage fields; search currently returns a bounded top-k candidate set. It does not offer exhaustive result pagination. A limited retrieval result is not proof that no other evidence exists.
+Search returns independently grounded `items` plus grouped `videos`, `audios` and `documents` when applicable. A group's clips retain their own timestamps and refs. Grouping does not itself produce a cross-clip conclusion. Check retrieval coverage fields; search currently returns a bounded top-k candidate set. It does not offer exhaustive result pagination. A limited retrieval result is not proof that no other evidence exists.
+
+## PDF and Office document jobs
+
+`/ingest` accepts `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (DOCX), `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (XLSX), and `application/vnd.openxmlformats-officedocument.presentationml.presentation` (PPTX). Keep the original root ref. Document admission returns a queued whole-source job, not a fully published source:
+
+```js
+const bytes = await readFile('evidence.pdf');
+const job = await memory('/ingest', {
+  operationId: 'document-001', sessionRef: 'chat-001', messageRef: 'document-message-001',
+  mimeType: 'application/pdf', dataBase64: bytes.toString('base64'),
+});
+const status = await memory('/document/status', { operationId: job.operationId });
+// After status.state === 'complete':
+const page = await memory('/document/units', { ref: status.ref, limit: 32 });
+const original = await memory('/read', { ref: status.ref });
+const unit = await memory('/read', { ref: page.units[0].ref });
+```
+
+| Path | Body | Behavior |
+| --- | --- | --- |
+| `/document/status` | `{operationId}` | Inspect queued/running/unknown/complete/superseded state, cursor, unit count and coverage without repeating work |
+| `/document/step` | `{operationId}` | Explicitly advance a queued unit; do not use as a progress query while a job is running |
+| `/document/recover` | `{previousOperationId, operationId, acceptUnknown: true}` | Explicit recovery with a distinct operation ID and new source revision; exact replay returns the same recovery job |
+| `/document/units` | `{ref, cursor?, limit?: 32}` | Navigate a completed root's child refs, native locators and coverage; limit 1–64, opaque cursor |
+
+Workers alarms normally form units one at a time. The root becomes active only when all units finish; partially formed children are ineligible for retrieval and knowledge. Reuse an operation ID only for its exact original request. An unknown job does not automatically replay model work: inspect status and explicitly recover; late results from its previous revision cannot publish into the replacement. Admission/recovery receipts can be replayed without creating another root.
+
+PDF units retain zero-based original `pageIndex`, page size/rotation and native single-page PDF visuals. PPTX units retain slide index and local shape/group geometry. DOCX units use section/block, paragraph/table row-column and drawing anchors; XLSX units use sheet/name/cell-range, merges, row-column properties, formulas **separate from cached values**, workbook 1900/1904 date system, and image anchors. These Office coordinates are not Word/Excel print pages. Embedded assets and bounded structural context reach the model together. A crop records the viewport metadata, but the model receives the **full embedded asset**, not a rendered crop; inspect `coverage` and the full-asset indication before treating an image detail as visibly present on a page/slide.
+
+Root `/read` returns the uploaded bytes and original MIME. Child `/read` returns a derived document-unit JSON representation containing native page/image data plus `documentUnit.original`, locator and coverage; it is not the full uploaded Office/PDF file. Use `/document/units` to navigate, not reconstructed child IDs. `/search` returns `items[].documentEvidence[]` and grouped `documents: [{ref, units}]`. Units share the same provenance root and are not independent corroborating sources. Grouping is navigation, not cross-page reasoning; there is no document cross-page reasoning endpoint. Cross-source proposition relations remain governed by the existing knowledge evidence/revision rules.
+
+`/correct` or `/reinspect` on the **root** queues a whole-source rebuild, immediately invalidating the old root and children. Child correct/reinspect/delete/revoke/recover returns `document_root_required`; act on the root. Root `/revoke` removes all derived units from retrieval/knowledge eligibility; root `/delete` also deletes the original, with existing cleanup/recovery semantics. Revalidate refs before later use.
+
+A single admission accepts at most **8 MiB original bytes and 128 native units**; a correction can append one Owner annotation unit. These are per-request/processing limits, not corpus storage limits. ZIP expands to at most 24 MiB/512 parts. PDF decode budgets are 8 MiB per stream and 24 MiB cumulative decode allocations; one output page is at most 8 MiB, all output pages together 16 MiB. Unit context is at most 64 KiB, with at most six embedded images per prepared unit. Embedded PNG/JPEG/WebP bytes pass through to the configured native provider; HEIC/AVIF/GIF use the bounded local decoder. Admission does not establish that every image is decodable by the provider. See [document limits and coverage](MEDIA.md#pdf-and-office-documents).
+
+Native document queries retain the 2 MiB original input cap. PDF queries accept at most six pages; Office query representations accept at most six native media parts and 64 KiB UTF-8 structural text. Query documents are separately observed as search cues, not admitted as source evidence. Document embedding requests set `autoTruncate: false` to request rejection of overlong input rather than silent truncation. The configured provider accepted this wire setting with native PDF/image inputs; an overlong-input rejection case has not been live-tested. Unparsed headers, themes, charts and other unsupported objects remain explicit coverage limitations, not evidence of absence or complete Office conformance.
+
+Combine `query` with `media` to select the content you want to find, for example a notice embedded in a PDF rather than the PDF's surrounding page label. The text query selects the requested content and constraints; native media supplies the referenced evidence. Without a text selector, grounding checks the full observed query cue, so an extra heading or layout relationship can prevent a match in another format. Every supplied image attached to a native unit belongs to that unit's evidence, but proximity alone does not prove that a heading authorizes or changes the event shown in an image.
+
+
+A document correction is a separately scoped Owner annotation, not a replacement observation for every page. Rebuild re-observes all native units and adds one `owner-correction` locator unit bound to the current root ref, preserving page/block/cell/slide qualifiers. Native-unit claims retain observation authority; the annotation has Owner authority. The annotation cannot become native document evidence: retrieval can classify a relevant annotation as `owner-correction`, but does not return it as proof of what the original page displays.
+
+Deterministically empty structural units (for example an empty paragraph or a PDF page without Contents or annotations) retain readable unit refs and locators. They do not call perception, embedding, Hy formation or knowledge models, and create no vector or claim; their presence does not prevent the root from completing. A model failure or unreadable nonempty unit is not treated as empty.
 
 ## Revisions and evidence
 

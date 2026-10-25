@@ -7,6 +7,7 @@ const ROUTES = new Set([
   '/recover', '/revision', '/video/upload', '/video/part', '/video/abort-upload',
   '/video/complete-upload', '/video/status', '/video/events', '/video/step',
   '/video/reason', '/video/recover',
+  '/document/status', '/document/step', '/document/recover', '/document/units',
   '/audio/upload', '/audio/part', '/audio/abort-upload', '/audio/complete-upload',
   '/audio/status', '/audio/events', '/audio/step', '/audio/reason', '/audio/recover',
 ]);

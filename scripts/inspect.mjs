@@ -29,6 +29,11 @@ export async function inspectFile(path) {
     };
     const head = Buffer.from(await read(0, Math.min(size, 4096)));
     const { extendedImageMime } = await import('../memory/dist/native-image.js');
+    if(head.subarray(0,1024).toString('latin1').includes('%PDF-') || head[0]===80 && head[1]===75){
+      if(size>8*1024*1024)return {supported:false,bytes:size,error:'document_source_size_exceeded'};
+      try{const {inspectDocument}=await import('../memory/dist/document-media.js');return {supported:true,bytes:size,...await inspectDocument(await read(0,size)),entrypoint:'/ingest',scope:'Native structure/media admission only; model inference and Office print rendering have not run.'};}
+      catch(error){return {supported:false,bytes:size,error:error.code||error.message,hint:'Supported document roots: PDF and DOCX/XLSX/PPTX. See docs/MEDIA.md for structure and coverage limits.'};}
+    }
     let mimeType = extendedImageMime(head) ?? (head.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) ? 'matroska'
       : head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE' ? 'audio/wav'
       : head.toString('ascii', 0, 4) === 'OggS' ? 'audio/ogg'
