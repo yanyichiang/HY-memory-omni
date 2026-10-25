@@ -58,7 +58,9 @@
     "memory/test/document-fixtures.mjs",
     "test/live-document-grounding.mjs",
     "test/live-flac-grounding.mjs",
-    "test/live-layout-grounding.mjs"
+    "test/live-layout-grounding.mjs",
+    "memory/fonts/",
+    "memory/test/office-render-fixtures.mjs"
   ],
   "dependencies": {
     "@wasm-audio-decoders/flac": "0.2.11",
@@ -71,13 +73,18 @@
     "mpg123-decoder": "1.0.3",
     "opus-decoder": "0.7.12",
     "pdf-lib": "1.17.1",
-    "wrangler": "4.151.0"
+    "wrangler": "4.151.0",
+    "reamkit": "1.33.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261014.1",
     "typescript": "5.9.3"
   },
   "overrides": {
-    "undici": "7.30.1"
+    "undici": "7.30.1",
+    "reamkit": {
+      "fast-xml-parser": "$fast-xml-parser",
+      "fflate": "$fflate"
+    }
   }
 }

@@ -33,3 +33,9 @@ Owner 局部纠正不替代全部原生观察：整源重建重新观察 native 
 确定空结构（空段、无 Contents / Annots 的 PDF 页、空 shape/worksheet）仍保留可读单位与原生 locator；跳过 perception/embedding/Hy/knowledge，不建 vector/claim，根任务可完成。模型失败、未读清的非空内容不得走此空单位路径。
 
 格式依据与完整排版有不同的完成条件。当前保存原始格式及来源，不计算 Word 的 toggle 样式、Excel 的条件格式或 PPTX 母版/主题继承；供模提示明确区分删除线/隐藏文字和普通可见正文，不把格式变化当 Owner 修订。实现依据：[Word toggle](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.bold)、[节属性](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.sectionproperties)、[Excel cell/base XF](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.spreadsheet.cellformat)。
+
+## Workers 内的 DOCX / XLSX 页面
+
+`office-render.mjs` 在原生单位之后增加派生 PDF 页，使用固定 Reamkit 1.33.1、构建期有界补丁与内置 OFL 字体。`office-rendered-page` 的 `page` 从 1 开始，仅定位这份派生 PDF；原生 PDF 的 `pageIndex` 仍从 0 开始。每页保留 rendering / coverage，字体替换、引擎漏报可能性和非 Office 等价性明确可读。原生结构、原件和渲染页共享一个 provenance root，整源重建、纠正及撤销一起生效。
+
+构建先执行 `prepareOfficeFonts()` 和 `prepareOffice()`，不依赖宿主字体或在线下载。字体缺字、超出有界布局/图像/输出限制会明确拒绝，不悄悄生成不完整的“成功”页面。限制详见 `docs/MEDIA.md`。字体来源与可复现构建见 `memory/fonts/SOURCE.md`；渲染器 MIT 原许可与修改脚本随构建产物保留。渲染报告的空 losses 不代表无损或通过完整 Office 兼容性验收。

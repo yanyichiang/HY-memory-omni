@@ -5,7 +5,7 @@ import { readConfig } from '../scripts/config.mjs';
 import { createRuntime } from '../scripts/runtime.mjs';
 
 const profile = process.env.HY_LIVE_PROFILE || 'all';
-if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'images', 'documents', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats, containers, container-search, images, documents or all.');
+if (!['knowledge', 'media', 'formats', 'containers', 'container-search', 'images', 'documents', 'office-rendering', 'all'].includes(profile)) throw Error('HY_LIVE_PROFILE must be knowledge, media, formats, containers, container-search, images, documents, office-rendering or all.');
 if (!process.env.HY_LIVE_OUTPUT) throw Error('Set HY_LIVE_OUTPUT to a new private results directory. This command calls your configured live models.');
 const out = resolve(process.env.HY_LIVE_OUTPUT);
 const reuseFrom = process.env.HY_LIVE_REUSE_FROM;
@@ -275,7 +275,7 @@ async function documentCases(){
     const created=await api('/ingest',{operationId,messageRef:fixture.name,sessionRef:'native-documents',mimeType:fixture.mimeType,dataBase64:Buffer.from(fixture.bytes).toString('base64')});
     const done=await waitJob('document',operationId),units=await api('/document/units',{ref:done.ref});
     const original=await api('/read',{ref:done.ref});
-    check(`${fixture.name} original and units retained`,done.ref.sourceId===created.ref.sourceId&&units.units.length===fixture.units&&Buffer.from(original.dataBase64,'base64').equals(Buffer.from(fixture.bytes)));
+    check(`${fixture.name} original and units retained`,done.ref.sourceId===created.ref.sourceId&&units.units.filter(u=>u.locator.kind!=='office-rendered-page').length===fixture.units&&Buffer.from(original.dataBase64,'base64').equals(Buffer.from(fixture.bytes)));
     for(const unit of units.units){const read=await api('/read',{ref:unit.ref});check(`${fixture.name} unit ${unit.index} linked native evidence`,read.documentUnit?.original.sourceId===done.ref.sourceId&&read.documentUnit.locator.kind===unit.locator.kind&&read.provenance.roots.length===1&&read.provenance.roots[0]===done.ref.sourceId);}
     documents.push({fixture,ref:done.ref,units:units.units});
   }
@@ -292,12 +292,57 @@ async function documentCases(){
   const expected=[documents[0].ref.sourceId,documents[1].ref.sourceId,documents[3].ref.sourceId];
   const evidence=found.items.flatMap(i=>i.documentEvidence??[]);
   check('text-scoped native PDF query grounds M-18 across three document formats',expected.every(id=>evidence.some(e=>e.original.sourceId===id))&&found.documents.length===3,evidence.map(e=>({original:e.original,locator:e.locator,text:e.text})));
-  check('text-scoped native PDF query excludes M-17 and unrelated cells',evidence.length===3&&evidence.every(e=>expected.includes(e.original.sourceId))&&evidence.filter(e=>e.original.sourceId===documents[0].ref.sourceId).every(e=>e.locator.pageIndex===0)&&evidence.filter(e=>e.original.sourceId===documents[1].ref.sourceId).every(e=>e.locator.blockIndex===0));
+  check('text-scoped native PDF query excludes M-17 and unrelated cells',evidence.filter(e=>e.locator.kind!=='office-rendered-page').length===3&&evidence.every(e=>expected.includes(e.original.sourceId))&&evidence.filter(e=>e.original.sourceId===documents[0].ref.sourceId).every(e=>e.locator.pageIndex===0)&&evidence.filter(e=>e.original.sourceId===documents[1].ref.sourceId&&e.locator.kind!=='office-rendered-page').every(e=>e.locator.blockIndex===0));
   // Revoking every root needs no further generative call to check eligibility.
   for(const [index,doc] of documents.entries())await api('/revoke',{ref:doc.ref,operationId:`document-revoke-${index}`});
   const after=await knowledge();
   check('revoked document roots remove all unit knowledge',after.claims.length===0&&after.relations.every(r=>!r.active));
   check('revoked roots and units are invalid',!(await api('/validate',{refs:documents.flatMap(d=>[d.ref,...d.units.map(u=>u.ref)])})).valid);
+  await save();
+}
+async function officeRenderingCases(){
+  const {officeRenderFixtures}=await import('../memory/test/office-render-fixtures.mjs');
+  const documents=[];
+  for(const [index,fixture] of officeRenderFixtures().entries()){
+    await writeFile(join(out,fixture.name),fixture.bytes,{mode:0o600});
+    const operationId=`office-${index}`;
+    await api('/ingest',{operationId,messageRef:fixture.name,sessionRef:'office-rendering',mimeType:fixture.mimeType,dataBase64:Buffer.from(fixture.bytes).toString('base64')});
+    const done=await waitJob('document',operationId),units=(await api('/document/units',{ref:done.ref})).units;
+    const pages=units.filter(u=>u.locator.kind==='office-rendered-page');
+    check(`${fixture.name} native units and two derived pages published`,pages.length===2&&units.length>pages.length&&done.complete);
+    check(`${fixture.name} original bytes preserved`,Buffer.from((await api('/read',{ref:done.ref})).dataBase64,'base64').equals(Buffer.from(fixture.bytes)));
+    for(const page of pages){
+      const read=await api('/read',{ref:page.ref}),packed=JSON.parse(Buffer.from(read.dataBase64,'base64').toString());
+      await writeFile(join(out,`${fixture.name}-page-${page.locator.page}.pdf`),Buffer.from(packed.derived.dataBase64,'base64'),{mode:0o600});
+      check(`${fixture.name} page ${page.locator.page} linked render evidence`,read.provenance.roots.length===1&&read.provenance.roots[0]===done.ref.sourceId&&read.documentUnit.original.sourceId===done.ref.sourceId&&packed.context.rendering.officeIdentical===false&&packed.coverage.unsupported.some(c=>c.kind==='office-render-font-substitution'));
+    }
+    documents.push({fixture,ref:done.ref,units});
+  }
+  const cases=[
+    {name:'Word rendered Chinese table',query:'Find a rendered Word document page that visibly shows the Chinese title 中文排版验证 and the two-cell table containing 项目 and 数值 42 on that same page.',document:0,page:1},
+    {name:'Excel cached value remains 99',query:'Find the rendered spreadsheet page showing 缓存公式 with displayed cached value 99. Do not recalculate the formula to 2.',document:1,page:1},
+    {name:'Excel hidden-row break carries to second page',query:'Find the rendered spreadsheet page with the repeated header 标题 / Value above both Second page / 42 and Last row / Done.',document:1,page:2},
+  ];
+  for(const c of cases){
+    const found=await api('/search',{query:c.query,sessionRef:'office-layout-query',limit:20});
+    const evidence=found.items.flatMap(i=>i.documentEvidence??[]);
+    check(c.name,evidence.some(e=>e.original.sourceId===documents[c.document].ref.sourceId&&e.basis==='rendered-document-page'&&e.locator.page===c.page),evidence.map(e=>({original:e.original,locator:e.locator,basis:e.basis,text:e.text})));
+  }
+  const absent=await api('/search',{query:'Find a rendered spreadsheet page visibly displaying the exact text HIDDEN ROW or HIDDEN COLUMN. Text retained only in hidden native cells does not qualify.',sessionRef:'office-layout-negative',limit:20});
+  check('hidden cells do not become visible page evidence',!absent.items.some(i=>i.documentEvidence?.some(e=>e.original.sourceId===documents[1].ref.sourceId)),absent.items.flatMap(i=>i.documentEvidence??[]));
+  const office=documents[0],old=office.ref,oldUnits=office.units;
+  await api('/reinspect',{ref:old,operationId:'office-reinspect',question:'Reinspect the retained original and derived pages: preserve the Chinese table, repeated header and explicit page break.'});
+  office.ref=(await waitJob('document','office-reinspect')).ref;
+  office.units=(await api('/document/units',{ref:office.ref})).units;
+  check('whole source reinspection replaces native and rendered refs',(await api('/validate',{refs:[old,...oldUnits.map(u=>u.ref)]})).invalid.length===oldUnits.length+1&&office.ref.revision===old.revision+1&&office.units.filter(u=>u.locator.kind==='office-rendered-page').length===2);
+  check('reinspection retains original bytes',Buffer.from((await api('/read',{ref:office.ref})).dataBase64,'base64').equals(Buffer.from(office.fixture.bytes)));
+  await runtime.dispose();runtime=await start();
+  check('rendered and native units survive runtime restart',(await api('/validate',{refs:documents.flatMap(d=>[d.ref,...d.units.map(u=>u.ref)])})).valid);
+  for(const [index,d]of documents.entries())await api('/revoke',{ref:d.ref,operationId:`office-revoke-${index}`});
+  const view=await knowledge();
+  check('revocation removes native and rendered knowledge',view.claims.length===0&&view.relations.every(r=>!r.active));
+  const allRefs=documents.flatMap(d=>[d.ref,...d.units.map(u=>u.ref)]);
+  check('revocation invalidates every representation',(await api('/validate',{refs:allRefs})).invalid.length===allRefs.length);
   await save();
 }
 try {
@@ -311,6 +356,7 @@ try {
   if (profile === 'container-search') await containerSearchCases();
   if (profile === 'images') await imageFormatCases();
   if (profile === 'documents') await documentCases();
+  if (profile === 'office-rendering') await officeRenderingCases();
   report.finished = true;
 } catch (error) {
   report.failures.push(error.message); report.error = error.message;

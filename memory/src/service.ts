@@ -424,7 +424,7 @@ export class MemoryService {
       examinedCandidates++;
       const matches: (Grounding & { ref: SourceRef })[] = [];
       const imageEvidence: { ref: SourceRef; text: string; model: string; configKey: string; basis: 'original-image' }[] = [];
-      const documentEvidence: {ref:SourceRef;original:SourceRef;locator:Record<string,unknown>;text:string;model:string;configKey:string;basis:'native-document-unit'}[] = [];
+      const documentEvidence: {ref:SourceRef;original:SourceRef;locator:Record<string,unknown>;text:string;model:string;configKey:string;basis:'native-document-unit'|'rendered-document-page'}[] = [];
       let temporal = false, unmatched = false, corrected = false;
       for (const ref of item.refs) {
         const source = await this.source(ref), key = JSON.stringify(ref);
@@ -444,7 +444,7 @@ export class MemoryService {
             const match=await this.models.matchDocument(input);
             if(typeof match.matches!=='boolean'||typeof match.correctionRelevant!=='boolean'||match.correctionRelevant && source.correction===undefined)throw new MemoryError('document_match_invalid',502);
             text(match.text);text(match.model,200);text(match.configKey,200);documents.set(key,match);
-            limitations.push('Document results use native source coordinates and disclosed parser coverage. Grouping units does not establish a cross-unit conclusion.');
+            limitations.push('Document results distinguish native coordinates from derived rendered pages and disclose parser/rendering coverage. All representations share the original provenance root. Grouping units does not establish a cross-unit conclusion.');
           } else if (isImage) {
             const match = await this.models.matchImage(input);
             if (typeof match.matches !== 'boolean' || typeof match.correctionRelevant !== 'boolean' || match.correctionRelevant && source.correction === undefined) throw new MemoryError('image_match_invalid', 502);
@@ -465,7 +465,7 @@ export class MemoryService {
         }
         if(isDoc){
           const match=documents.get(key)!;
-          if(match.matches)documentEvidence.push({ref,original:source.documentUnit!.original,locator:source.documentUnit!.locator,text:match.text,model:match.model,configKey:match.configKey,basis:'native-document-unit'});
+          if(match.matches)documentEvidence.push({ref,original:source.documentUnit!.original,locator:source.documentUnit!.locator,text:match.text,model:match.model,configKey:match.configKey,basis:source.documentUnit!.locator.kind==='office-rendered-page'?'rendered-document-page':'native-document-unit'});
           else if(match.correctionRelevant)corrected=true;else unmatched=true;
         } else if (isImage) {
           const match = images.get(key)!;

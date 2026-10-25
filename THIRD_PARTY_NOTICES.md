@@ -79,3 +79,13 @@ The authoritative terms are the component license texts. The project license doe
 `memory/codecs/gif/` adapts gifuct-js 2.1.2 (MIT); original attribution, modified preferred source and patch are included. `memory/codecs/animation/` includes minih264 at `b0baea7a80ef9d12da97301dd1099b8791b5ba43` (CC0), its complete header/bridge/build inputs and the bounded encoder WASM. Emscripten runtime notices reside under the HEIF codec directory and are copied into build output with all codec materials.
 
 PNG derivatives use fast-png 8.0.0 (MIT), installed from the pinned package, with fflate and iobuffer as declared transitive dependencies. These codecs do not relicense the application or original media under a common blanket license.
+
+## Bundled Office font subset
+
+`memory/fonts/HYOfficeSansSC-Regular.ttf` and `HYOfficeSansSC-Bold.ttf` are modified Noto Sans SC subsets (real weights 400/700), under SIL Open Font License 1.1. Copyright 2014–2021 Adobe, Reserved Font Name “Source”. The distinct modified family is HY Office Sans SC. Preserve the [full copyright and OFL](memory/fonts/licenses/NotoSansSC-OFL.txt) and [pinned source, reproduction and coverage notes](memory/fonts/SOURCE.md) with distributions. The font license is independent of the JavaScript renderer license. No Microsoft proprietary fonts are bundled.
+
+## Reamkit Office rendering
+
+`reamkit` **1.33.1**, by Alex Krassavin and contributors, is used under the **MIT License**. Source: https://github.com/alex-krassavin/reamkit. `memory/scripts/prepare-office.mjs` copies the pinned package, retains its original LICENSE and applies checked changes for hidden-row page boundaries, actual rendered-glyph checks and bounded grid/page/PDF allocation. Generated source and the adaptation script are copied into `memory/dist/licenses/reamkit/` with built distributions. Upstream authorship is retained; HY integration and patching are by YY under this repository's license.
+
+The renderer uses the separately licensed fonts described above. It does not download fonts at runtime, use installed Microsoft Office, invoke an external renderer, or promise identical Office printing. Source OOXML and the derived PDF retain separate representation identities under the same provenance root.
