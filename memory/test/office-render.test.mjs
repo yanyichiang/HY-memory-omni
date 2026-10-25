@@ -19,8 +19,33 @@ test('bounded Office renderer runs in workerd; hidden row page boundaries and ma
  const run=async(f,bytes=f.bytes)=>{const r=await mf.dispatchFetch('http://office/?mime='+encodeURIComponent(f.mimeType)+(process.env.OFFICE_PREVIEW_DIR?'&preview=1':''),{method:'POST',body:bytes});return {status:r.status,...await r.json()};};
  try{
   const [docx,xlsx]=officeRenderFixtures();
-  for(const fixture of [docx,xlsx]){const r=await run(fixture);assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.units.length,2,fixture.name);for(const [i,u]of r.units.entries()){if(process.env.OFFICE_PREVIEW_DIR){await mkdir(process.env.OFFICE_PREVIEW_DIR,{recursive:true});await writeFile(join(process.env.OFFICE_PREVIEW_DIR,fixture.name+'.page'+(i+1)+'.pdf'),Uint8Array.from(u.pdf));}assert.equal(u.locator.kind,'office-rendered-page');assert.equal(u.locator.page,i+1);assert.equal(u.mimeType,'application/pdf');assert.ok(u.bytes>100);assert.equal(u.context.rendering.officeIdentical,false);assert.ok(u.coverage.unsupported.some(x=>x.kind==='office-renderer-loss-report-incomplete'));}}
+  for(const fixture of [docx,xlsx]){const r=await run(fixture);assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.units.length,2,fixture.name);
+   if(fixture===xlsx){
+    const first=r.units[0].context.renderedTableTopology,second=r.units[1].context.renderedTableTopology;
+    assert.equal(first.basis,'same-pdf-layout-pass');
+    assert.deepEqual(first.rows.map(row=>row.sourceRow),[1,2,3]);
+    const merged=first.rows[2];assert.equal(merged.rowFragment,true);assert.equal(merged.omittedCellCount,0);assert.equal(merged.cells.length,1);
+    assert.equal(merged.cells[0].spanKind,'source-merge');assert.equal(merged.cells[0].layoutColumnSpan,2);
+    assert.deepEqual(merged.cells[0].sourceMerge,{startRow:3,endRow:3,startColumn:1,endColumn:2});
+    assert.deepEqual(second.rows.map(row=>row.sourceRow),[1,5,6]);assert.equal(second.rows[0].isPrintTitleRow,true);
+    assert.ok([...first.rows,...second.rows].every(row=>row.sourceRow!==4));
+   }
+   for(const [i,u]of r.units.entries()){if(process.env.OFFICE_PREVIEW_DIR){await mkdir(process.env.OFFICE_PREVIEW_DIR,{recursive:true});await writeFile(join(process.env.OFFICE_PREVIEW_DIR,fixture.name+'.page'+(i+1)+'.pdf'),Uint8Array.from(u.pdf));}assert.equal(u.locator.kind,'office-rendered-page');assert.equal(u.locator.page,i+1);assert.equal(u.mimeType,'application/pdf');assert.ok(u.bytes>100);assert.equal(u.context.rendering.officeIdentical,false);assert.ok(u.coverage.unsupported.some(x=>x.kind==='office-renderer-loss-report-incomplete'));}}
   const sheet='xl/worksheets/sheet1.xml';
+  const overflow=edit(xlsx.bytes,sheet,s=>s.replace('<col min="3" max="3" width="20" hidden="1"/>','<col min="3" max="3" width="20"/>').replace('Done','Long text extending into the empty neighbour column without any source merge'));
+  const overflowResult=await run(xlsx,overflow);assert.equal(overflowResult.status,200,JSON.stringify(overflowResult));
+  const overflowCells=overflowResult.units.flatMap(unit=>unit.context.renderedTableTopology.rows).flatMap(row=>row.cells);
+  const spilled=overflowCells.find(cell=>cell.sourceRow===6&&cell.sourceColumn===2);
+  assert.equal(spilled.spanKind,'text-overflow');assert.equal(spilled.sourceMerge,undefined);assert.ok(spilled.layoutColumnSpan>1);
+  // 512 short source-bearing cells on one compact print page exceed the existing
+  // 64 KiB unit-context limit solely through emitted topology, below old XML/grid limits.
+  const denseParts=unzipSync(xlsx.bytes),column=n=>n<=26?String.fromCharCode(64+n):'A'+String.fromCharCode(64+n-26);
+  const denseRows=Array.from({length:16},(_,r)=>`<row r="${r+1}" ht="8" customHeight="1">${Array.from({length:32},(_,c)=>`<c r="${column(c+1)}${r+1}" t="inlineStr"><is><t>1</t></is></c>`).join('')}</row>`).join('');
+  let denseSheet=strFromU8(denseParts[sheet]).replace(/<sheetData>[\s\S]*?<\/sheetData>/,'<sheetData>'+denseRows+'</sheetData>')
+   .replace(/<cols>[\s\S]*?<\/cols>/,'<cols><col min="1" max="32" width="2" customWidth="1"/></cols>')
+   .replace(/<mergeCells[\s\S]*?<\/mergeCells>/,'').replace(/<rowBreaks[\s\S]*?<\/rowBreaks>/,'');
+  denseParts[sheet]=strToU8(denseSheet);denseParts['xl/workbook.xml']=strToU8(strFromU8(denseParts['xl/workbook.xml']).replace('$A$1:$C$6','$A$1:$AF$16'));
+  const denseResult=await run(xlsx,zipSync(denseParts));assert.equal(denseResult.status,422);assert.equal(denseResult.error,'document_unit_context_exceeded');
   const hidden=edit(xlsx.bytes,sheet,s=>s.replace('<row r="5" ht="30" customHeight="1">','<row r="5" hidden="1" ht="30" customHeight="1">'));
   assert.equal((await run(xlsx,hidden)).units.length,2,'consecutive hidden rows preserve break');
   const offset=edit(xlsx.bytes,'xl/workbook.xml',s=>s.replace('$A$1:$C$6','$A$2:$C$6'));

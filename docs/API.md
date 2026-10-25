@@ -176,3 +176,6 @@ Known Word dimensional properties include optional `measurements` annotations co
 
 
 For a query requiring a rendered Word/Excel page or placement on the same rendered page, native paragraphs/cell ranges alone are insufficient evidence. They remain searchable for their preserved text, values and explicit properties. Rendered-page evidence must inspect the attached derived PDF; matching text in a native range or likely print settings does not establish that page relationship.
+
+
+Rendered XLSX unit context additionally carries `renderedTableTopology`, captured from the same PDF layout pass. Rows are emitted fragments, with one-based worksheet source coordinates, source merge bounds and current layout column spans; text overflow is distinguished from merging. `isPrintTitleRow` is a repeatable title-row role, including its first occurrence. Coverage is partial: cells without preserved source coordinates, including some synthetic headings and column-band continuation blanks, can be omitted; `omittedCellCount` records gaps within captured rows. Missing records do not establish absence. This is derived evidence under the original root, not independent support or a complete source-to-page map. The existing 64 KiB unit-context limit applies.

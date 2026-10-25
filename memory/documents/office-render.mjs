@@ -130,14 +130,26 @@ export async function renderOffice(mimeType,bytes){
   if(HY_OFFICE_BOUNDED!==true)fail('office_render_bounded_build_required');
   const {admission,renderBytes}=preflightOffice(bytes);
   const document=Ream.parse(renderBytes);if(document.format!==format)fail('office_render_format_mismatch');
-  const result=await document.convertWithReport('pdf',{fonts:officeFonts(),fontFetch:()=>fail('office_render_network_font_forbidden')});
+  let renderedRows;
+  const result=await document.convertWithReport('pdf',{fonts:officeFonts(),fontFetch:()=>fail('office_render_network_font_forbidden'),hyCaptureLayout:pages=>{renderedRows=pages.map(page=>page.hyXlsxRows??[]);}});
   if(result.bytes.length>16*MiB)fail('office_render_output_budget_exceeded');
   const pages=await splitDerivedOfficePdf(result.bytes);
+  if(!renderedRows||renderedRows.length!==pages.length)fail('office_render_topology_page_mismatch');
   const unsupported=[{kind:'office-rendered-pages-not-office-identical',detail:'Derived pagination uses Ream and bundled substitute fonts. Source native coordinates remain authoritative.'},
     {kind:'office-renderer-loss-report-incomplete',detail:'An empty renderer loss list does not establish fidelity. Layout, typography, fields, charts and unsupported OOXML may differ.'},
     {kind:'office-render-font-substitution',detail:fontPolicy},
     ...result.losses.map(loss=>({kind:'office-renderer-reported-loss',detail:loss}))];
   if(format==='xlsx')unsupported.push({kind:'office-formulas-not-recalculated',detail:'Cell formulas use cached source values; Ream can evaluate a limited formula subset for conditional formatting. No workbook recalculation is performed.'});
-  const rendering={namespacePolicy:'Renderer copy canonicalizes prefixes and Strict OOXML namespace/relationship identifiers to their transitional equivalents; original bytes and native structure are retained.',engine:'reamkit',version:'1.33.1',patches:['hidden-row-page-boundary','bounded-grid-pages-output','missing-visible-glyph-rejection'],fontPolicy,admission,sourceFormat:format,officeIdentical:false};
-  return {units:pages.map((unit,index)=>({locator:{kind:'office-rendered-page',format,page:index+1},context:{rendering,pageGeometry:unit.context},coverage:{unsupported},images:[],derived:unit.derived})),coverage:{unsupported}};
+  const rendering={namespacePolicy:'Renderer copy canonicalizes prefixes and Strict OOXML namespace/relationship identifiers to their transitional equivalents; original bytes and native structure are retained.',engine:'reamkit',version:'1.33.1',patches:['hidden-row-page-boundary','bounded-grid-pages-output','missing-visible-glyph-rejection','same-pass-xlsx-table-topology'],fontPolicy,admission,sourceFormat:format,officeIdentical:false};
+  const units=pages.map((unit,index)=>{
+    const context={rendering,pageGeometry:unit.context,...format==='xlsx'?{renderedTableTopology:{
+      basis:'same-pdf-layout-pass',
+      coordinateBasis:'Source rows/columns are one-based worksheet coordinates retained by the actual print projection; layout columns belong to emitted row fragments. Source merge bounds describe the original grid; layout spans describe this emitted fragment.',
+      coverage:'Partial XLSX body grid: only cells retaining source coordinates. Synthetic print headings and column-band continuation blanks may be omitted; omittedCellCount reports missing cells within a captured row. Header/footer text, shapes and page geometry are not covered. Missing records do not establish absence. Print-title roles can appear on the first page; isPrintTitleRow does not assert this occurrence is a repeat. Split/repeated fragments may repeat source coordinates. A null sheet name is unresolved.',
+      rows:renderedRows[index],
+    }}:{}};
+    if(encoder.encode(JSON.stringify(context)).length>65536)fail('document_unit_context_exceeded');
+    return {locator:{kind:'office-rendered-page',format,page:index+1},context,coverage:{unsupported},images:[],derived:unit.derived};
+  });
+  return {units,coverage:{unsupported}};
 }

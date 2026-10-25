@@ -20,6 +20,24 @@ export async function prepareOffice(){
   await patch('layout/styled-layout.js',[
     ['this.pages.push({','if (this.pages.length >= 128) throw Error("office_render_page_budget_exceeded");\n\t\tthis.pages.push({'],
   ]);
+  await patch("excel/print-model.js",[
+    ["function verticalMergeParent(merges, row, column) {","function hyXlsxCell(print, row, column, merge, overflow = false) {\n\treturn {sourceSheet: print.sheetName ?? null, sourceRow: row + 1, sourceColumn: column + 1,\n\t\tspanKind: merge ? \"source-merge\" : overflow ? \"text-overflow\" : \"ordinary\",\n\t\t...merge ? {sourceMerge: {startRow: merge.startRow + 1, endRow: merge.endRow + 1, startColumn: merge.startColumn + 1, endColumn: merge.endColumn + 1}} : {}};\n}\nfunction verticalMergeParent(merges, row, column) {"],
+    ["const properties = {\n\t\t\t\t...mergeSpan > 1 ?","const properties = {\n\t\t\t\thyXlsx: hyXlsxCell(print, absR, absC, merge, overflowSpan > 1),\n\t\t\t\t...mergeSpan > 1 ?"],
+    ["cells.push(makeVerticalContinuation(verticalParent, colWindowEnd, absR, rowWindowEnd, {","cells.push(makeVerticalContinuation(verticalParent, colWindowEnd, absR, rowWindowEnd, {\n\t\t\t\t\t\thyXlsx: hyXlsxCell(print, absR, absC, verticalParent),"],
+    ["\t\t\tmerge: absR < Math.min(merge.endRow, rowWindowEnd) ? \"middle\" : \"end\",","\t\t\thyXlsx: paint.hyXlsx,\n\t\t\tmerge: absR < Math.min(merge.endRow, rowWindowEnd) ? \"middle\" : \"end\","],
+    ["const rowProps = {\n\t\t\tcantSplit: true,","const rowProps = {\n\t\t\thyXlsx: {sourceSheet: print.sheetName ?? null, sourceRow: absR + 1},\n\t\t\tcantSplit: true,"],
+    ["colSpan: (cell.properties.colSpan ?? 1) + span - 1","colSpan: (cell.properties.colSpan ?? 1) + span - 1,\n\t\t\t\thyXlsx: {...cell.properties.hyXlsx, spanKind: cell.properties.hyXlsx?.sourceMerge ? \"source-merge\" : \"text-overflow\"}"],
+  ]);
+  await patch("layout/styled-layout.js",[
+    ["const rp = table.rows[r].properties;","const rp = table.rows[r].properties;\n\t\tif (rp.hyXlsx) rl.hyXlsx = rp.hyXlsx;"],
+    ["\t\twidthPt,\n\t\tpadTopPt,","\t\twidthPt,\n\t\t...cell.properties.hyXlsx ? {hyXlsx: cell.properties.hyXlsx} : {},\n\t\tpadTopPt,"],
+    ["function emitRowChunk(out, row, marginLeft, cursorY, pageHeight, colCount, cellStructIds, mergedHeights, anchored) {","function emitRowChunk(out, row, marginLeft, cursorY, pageHeight, colCount, cellStructIds, mergedHeights, anchored) {\n\tif (row.hyXlsx) {\n\t\tconst cells = row.cells.filter(cell => cell.hyXlsx).map(cell => ({...cell.hyXlsx,\n\t\t\tlayoutColumnStart: cell.colStart + 1, layoutColumnSpan: cell.colSpan,\n\t\t\tverticalMergeRole: cell.mergeRole, clipped: cell.clipped === true}));\n\t\tout.hyXlsxCellCount = (out.hyXlsxCellCount ?? 0) + cells.length;\n\t\tif (out.hyXlsxCellCount > 32768) throw Error(\"office_render_topology_budget_exceeded\");\n\t\t(out.hyXlsxRows ??= []).push({...row.hyXlsx, rowFragment: true,\n\t\t\tfragmentIndex: row.hyFragmentIndex ?? 0, isPrintTitleRow: row.isHeader === true, omittedCellCount: row.cells.length - cells.length, cells});\n\t}"],
+    ["\t\t\tcolumnXOffsets: row.columnXOffsets,\n\t\t\trowIdx: row.rowIdx,","\t\t\tcolumnXOffsets: row.columnXOffsets,\n\t\t\t...row.hyXlsx ? {hyXlsx: row.hyXlsx, hyFragmentIndex: out.length} : {},\n\t\t\trowIdx: row.rowIdx,"],
+    ["\t\tthis.pages.push({","\t\tthis.hyXlsxCellCount = (this.hyXlsxCellCount ?? 0) + (this.current.hyXlsxCellCount ?? 0);\n\t\tif (this.hyXlsxCellCount > 32768) throw Error(\"office_render_topology_budget_exceeded\");\n\t\tthis.pages.push({\n\t\t\thyXlsxRows: this.current.hyXlsxRows ?? [],"],
+  ]);
+  await patch("pdf/styled-page-renderer.js",[
+    ["\tconst doc = new PdfDocument();\n\treturn emitStyledPdf(laid, options, doc);","\toptions.hyCaptureLayout?.(laid.pages);\n\tconst doc = new PdfDocument();\n\treturn emitStyledPdf(laid, options, doc);"],
+  ]);
   await patch('core/font/ttf-parser.js',[
     ['const glyphForCodepoint = buildCmap(raw, require("cmap").offset);','const hyCmap = buildCmap(raw, require("cmap").offset);\n\tconst glyphForCodepoint = (cp) => { const glyph = hyCmap(cp); if (!glyph && !/[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]/u.test(String.fromCodePoint(cp))) throw Error("office_render_font_glyph_unsupported:U+" + cp.toString(16).toUpperCase()); return glyph; };'],
     ['\t\tglyphForCodepoint,','\t\tglyphForCodepoint,\n\t\thyRawGlyphForCodepoint: hyCmap,'],
