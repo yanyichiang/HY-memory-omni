@@ -114,7 +114,7 @@ npx --no-install hy-memory-omni init
 npx --no-install hy-memory-omni start
 ```
 
-源码包包含源码、npm-shrinkwrap / pylock 和许可证，运行依赖在安装后的首次启动时准备。本项目暂未发布到 npm registry。
+源码包包含应用源码、npm-shrinkwrap / pylock、许可证，以及下文列明的独立编解码 WASM 和字体资源；对应源码与重建材料一并提供。其余运行依赖在安装后的首次启动时准备。本项目暂未发布到 npm registry。
 
 `overrides` 必须设在安装者项目的根 `package.json`；npm 不继承依赖包中的 overrides，本地 tarball 安装也不能据此假定锁文件已生效。上面的命令固定修补后的 HTTP 依赖。源码克隆路径已有这项设置，直接 `npm ci` 即可。见 [npm 的 overrides 规则](https://docs.npmjs.com/cli/v10/configuring-npm/package-json/#overrides)。
 
@@ -286,7 +286,7 @@ npm pack
 
 原创代码与文档由 **YY** 以 [Apache-2.0](LICENSE) 发布。感谢 [Tencent Hy-Memory](https://github.com/Tencent-Hunyuan/Hy-Memory) 提供记忆内核；原始署名与许可证保留在 [NOTICE](NOTICE) 和 [UPSTREAM-LICENSE](engine/UPSTREAM-LICENSE)。本项目为独立衍生项目，不代表腾讯官方产品或背书。
 
-Mediabunny、音频解码组件及 Python 依赖保留各自的 MPL / LGPL / MIT 等许可证，详见 [第三方许可证说明](THIRD_PARTY_NOTICES.md)。当前分发包含应用源码及可独立替换的 AAC WASM 模块，随附完整对应源码、构建脚本与许可证；其他解码器由锁定依赖生成。再分发完整运行环境时仍需保留所含组件的对应声明。
+Mediabunny、音频解码组件及 Python 依赖保留各自的 MPL / LGPL / MIT 等许可证，详见 [第三方许可证说明](THIRD_PARTY_NOTICES.md)。当前分发包含应用源码，以及可独立替换的 AAC、HEIF/AVIF 解码和动画编码 WASM 模块，随附对应源码、补丁、构建脚本与许可证。另附采用 OFL-1.1 许可的 HY Office Sans SC 字体子集及其来源、修改脚本和原始署名；其余解码器由锁定依赖生成。再分发完整运行环境还须满足所含组件的许可证及对应源码要求；本项目的 Apache-2.0 许可不替代这些许可。
 
 
 

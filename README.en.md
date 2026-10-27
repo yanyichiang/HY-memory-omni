@@ -114,7 +114,7 @@ npx --no-install hy-memory-omni init
 npx --no-install hy-memory-omni start
 ```
 
-The source package includes source code, npm-shrinkwrap / pylock, and licenses. Runtime dependencies are prepared on the first start after installation. This project has not been published to the npm registry.
+The source package includes application source, npm-shrinkwrap / pylock, licenses, and the standalone codec WASM and font assets listed below, with corresponding source and rebuild materials. Other runtime dependencies are prepared on the first start after installation. This project has not been published to the npm registry.
 
 Set `overrides` in the consuming project’s root `package.json`. npm does not inherit overrides from dependencies; a local tarball install must not assume its bundled lockfile enforced them. The commands above pin the patched HTTP dependency. Source clones already contain this setting and use `npm ci`. See [npm’s override rules](https://docs.npmjs.com/cli/v10/configuring-npm/package-json/#overrides).
 
@@ -286,7 +286,7 @@ When reporting an issue, include the version, minimal reproduction steps, and re
 
 Original code and documentation are released by **YY** under [Apache-2.0](LICENSE). Thanks to [Tencent Hy-Memory](https://github.com/Tencent-Hunyuan/Hy-Memory) for the memory engine. Original attribution and licensing are preserved in [NOTICE](NOTICE) and [UPSTREAM-LICENSE](engine/UPSTREAM-LICENSE). This is an independent derivative project, without official Tencent endorsement or product affiliation.
 
-Mediabunny, audio decoding components, and Python dependencies retain their respective MPL / LGPL / MIT and other licenses. See [third-party license notices](THIRD_PARTY_NOTICES.md). Distribution contains application source and an independently replaceable AAC WASM module, with complete corresponding source, build script and licenses; other decoders are generated from locked dependencies. Redistributing a complete runtime must retain the included components’ notices.
+Mediabunny, audio decoding components, and Python dependencies retain their respective MPL / LGPL / MIT and other licenses. See [third-party license notices](THIRD_PARTY_NOTICES.md). Distribution contains application source and independently replaceable AAC, HEIF/AVIF decoding and animation encoding WASM modules, with corresponding source, patches, build scripts and licenses. It also includes the OFL-1.1 HY Office Sans SC font subsets with their provenance, modification script and original attribution. Other decoders are generated from locked dependencies. Redistributing a complete runtime must satisfy the included components’ license and corresponding-source requirements; the project's Apache-2.0 license does not replace them.
 
 
 
