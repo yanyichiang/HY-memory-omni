@@ -2,7 +2,7 @@
 
 ## Scope
 
-The standalone source tree includes the TS memory authority, authenticated HTTP gateway, pinned Tencent Python core and Workers runtime launcher. It requires no agent-framework checkout or separate Hy checkout. The initial packaging results below predate the format expansions: the current distribution also includes the documented codec WASM modules and font assets with their corresponding source and license materials (see THIRD_PARTY_NOTICES.md). Publication remains private; this is not an npm-registry release or a cloud deployment.
+The standalone source tree includes the TS memory authority, authenticated HTTP gateway, pinned Tencent Python core and Workers runtime launcher. It requires no agent-framework checkout or separate Hy checkout. The initial packaging results below predate the format expansions: the current distribution also includes the documented codec WASM modules and font assets with their corresponding source and license materials (see THIRD_PARTY_NOTICES.md). This record covers source distribution and standalone operation; it does not certify an npm-registry release or a hosted deployment. Repository visibility is managed separately by the Owner. References to private review and publication restrictions in the dated entries describe those historical checkpoints.
 
 ## Executed verification
 
